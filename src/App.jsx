@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { doc, setDoc, getDoc, onSnapshot, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot, updateDoc, serverTimestamp, runTransaction } from 'firebase/firestore';
 import { ArrowRight, Users, Crown, Loader, BrainCircuit, Check, X, Copy, PartyPopper } from 'lucide-react';
 import { auth, db } from './firebase';
 
@@ -43,8 +43,9 @@ const PlayerCard = ({ player, isLeader, isSelf, score, rank }) => (
     </div>
 );
 
-const HomeScreen = ({ setRoomCode, setPlayerName, handleJoinRoom, handleCreateRoom, playerName }) => {
+const HomeScreen = ({ setPlayerName, handleJoinRoom, handleCreateRoom, playerName }) => {
     const [isJoining, setIsJoining] = useState(false);
+    const [joinCode, setJoinCode] = useState('');
     const [currentFact, setCurrentFact] = useState(0);
     const [showPricingModal, setShowPricingModal] = useState(false);
     const [dailyChallenge] = useState({ topic: 'Ancient Civilizations', reward: '500 XP', timeLeft: '14:32:18' });
@@ -205,14 +206,15 @@ const HomeScreen = ({ setRoomCode, setPlayerName, handleJoinRoom, handleCreateRo
                                             type="text"
                                             placeholder="Enter battle code"
                                             maxLength="6"
-                                            onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                                            value={joinCode}
+                                            onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                                             className="w-full px-6 py-4 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-200 border-3 border-gray-200 dark:border-gray-600 focus:border-indigo-500 rounded-xl outline-none transition-all duration-300 text-center font-mono tracking-widest text-xl"
                                         />
                                     </AnimateIn>
                                 )}
                                 <button 
-                                    onClick={isJoining ? handleJoinRoom : handleCreateRoom} 
-                                    disabled={!playerName}
+                                    onClick={isJoining ? () => handleJoinRoom(joinCode) : handleCreateRoom} 
+                                    disabled={!playerName || (isJoining && !joinCode.trim())}
                                     className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold py-6 px-6 rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all duration-300 transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-3 text-2xl shadow-2xl">
                                     {isJoining ? <>Join Battle <ArrowRight className="w-7 h-7" /></> : 'Create Battle Room'}
                                 </button>
@@ -540,15 +542,11 @@ const LobbyScreen = ({ roomData, userId, handleStartGame, isGenerating }) => {
                 <div className="space-y-4">
                     <h3 className="font-bold text-xl dark:text-white flex items-center gap-2"><Users className="w-6 h-6" /> Players ({Object.keys(roomData.players).length})</h3>
                     <div className="space-y-3 max-h-60 overflow-y-auto p-1">
-                        {Object.entries(roomData.players).map(([id, player]) => {
-                            // Debug log to see what's happening with player data
-                            console.log('Player data:', id, player);
-                            return (
-                                <AnimateIn key={id} from="opacity-0 -translate-x-4" to="opacity-100 translate-x-0">
-                                    <PlayerCard player={player} isLeader={roomData.leaderId === id} isSelf={userId === id} />
-                                </AnimateIn>
-                            );
-                        })}
+                        {Object.entries(roomData.players).map(([id, player]) => (
+                            <AnimateIn key={id} from="opacity-0 -translate-x-4" to="opacity-100 translate-x-0">
+                                <PlayerCard player={player} isLeader={roomData.leaderId === id} isSelf={userId === id} />
+                            </AnimateIn>
+                        ))}
                     </div>
                 </div>
 
@@ -899,30 +897,53 @@ export default function App() {
         setRoomCode(newRoomCode);
     };
 
-    const handleJoinRoom = async () => {
-        if (!playerName.trim() || !roomCode.trim() || !userId) return setError('Please enter your name and a room code.');
+    const handleJoinRoom = async (codeToJoin) => {
+        if (!playerName.trim() || !codeToJoin.trim() || !userId) return setError('Please enter your name and a room code.');
         setError('');
         
         try {
-            const roomRef = doc(db, 'quizRooms', roomCode);
-            const docSnap = await getDoc(roomRef);
-            if (docSnap.exists()) {
-                console.log('Joining room with player:', { name: playerName, avatar: '🧑‍🚀', score: 0, answers: {} });
-                await updateDoc(roomRef, { 
-                    [`players.${userId}`]: { 
-                        name: playerName, 
-                        avatar: '🧑‍🚀', 
-                        score: 0, 
-                        answers: {} 
+            const roomRef = doc(db, 'quizRooms', codeToJoin);
+            
+            await runTransaction(db, async (transaction) => {
+                const roomDoc = await transaction.get(roomRef);
+                
+                if (!roomDoc.exists()) {
+                    throw new Error('Room does not exist.');
+                }
+                
+                const roomData = roomDoc.data();
+                
+                // Check if game has already started
+                if (roomData.gameState !== 'lobby') {
+                    throw new Error('Game has already started. Cannot join now.');
+                }
+                
+                // Add the new player to the players object
+                const updatedPlayers = {
+                    ...roomData.players,
+                    [userId]: {
+                        name: playerName,
+                        avatar: '🧑‍🚀',
+                        score: 0,
+                        answers: {}
                     }
-                });
-                console.log('Successfully joined room');
-            } else {
-                setError('Room does not exist.');
-            }
+                };
+                
+                transaction.update(roomRef, { players: updatedPlayers });
+            });
+            
+            // Set the room code only after successful join
+            setRoomCode(codeToJoin);
+            console.log('Successfully joined room');
         } catch (err) {
             console.error('Error joining room:', err);
-            setError('Failed to join room. Please try again.');
+            if (err.message === 'Room does not exist.') {
+                setError('Room does not exist.');
+            } else if (err.message === 'Game has already started. Cannot join now.') {
+                setError('Game has already started. Cannot join now.');
+            } else {
+                setError('Failed to join room. Please try again.');
+            }
         }
     };
     
@@ -1025,7 +1046,7 @@ export default function App() {
                 default: return <p>Unknown game state.</p>;
             }
         }
-        return <HomeScreen setRoomCode={setRoomCode} setPlayerName={setPlayerName} playerName={playerName} handleJoinRoom={handleJoinRoom} handleCreateRoom={handleCreateRoom} />;
+        return <HomeScreen setPlayerName={setPlayerName} playerName={playerName} handleJoinRoom={handleJoinRoom} handleCreateRoom={handleCreateRoom} />;
     };
 
     return (
