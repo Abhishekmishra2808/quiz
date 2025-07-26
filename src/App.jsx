@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { doc, setDoc, onSnapshot, updateDoc, serverTimestamp, runTransaction } from 'firebase/firestore';
 import { ArrowRight, Users, Crown, Loader, BrainCircuit, Check, X, Copy, PartyPopper } from 'lucide-react';
@@ -165,348 +165,355 @@ const HomeScreen = ({ setPlayerName, handleJoinRoom, handleCreateRoom, playerNam
                 <div className="absolute bottom-1/4 right-1/3 w-10 h-10 bg-orange-300 dark:bg-orange-700 rounded-full animate-ping"></div>
             </div>
 
-            {/* Main content with absolute positioning for scattered layout */}
-            <div className="relative z-10 min-h-screen w-full">
+            {/* Main responsive content */}
+            <div className="relative z-10 min-h-screen w-full p-2 sm:p-4 lg:p-6">
                 
-                {/* Header - Top Center */}
-                <div className="absolute top-8 left-1/2 transform -translate-x-1/2 text-center">
-                    <AnimateIn>
-                        <div className="relative inline-block">
-                            <BrainCircuit className="w-24 h-24 mx-auto text-indigo-500 animate-pulse" />
-                            <div className="absolute -top-3 -right-3 w-8 h-8 bg-green-500 rounded-full animate-bounce flex items-center justify-center">
-                                <span className="text-white text-sm font-bold">∞</span>
-                            </div>
+                {/* Header - 3-column grid: Did You Know | Title | Premium Feature */}
+                <div className="mb-4 lg:mb-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-center">
+                        {/* Did You Know - Left */}
+                        <div className="lg:col-span-3 flex justify-center lg:justify-start order-2 lg:order-1 mb-4 lg:mb-0">
+                            <AnimateIn from="opacity-0 -translate-x-12" to="opacity-100 translate-x-0" duration="duration-800">
+                                <div className="bg-gradient-to-r from-purple-500/25 to-blue-500/25 dark:from-purple-600/25 dark:to-blue-700/25 backdrop-blur-sm rounded-xl p-3 sm:p-4 border border-purple-300/60 dark:border-purple-600/60 w-full max-w-xs">
+                                    <h3 className="text-sm sm:text-base font-bold text-purple-700 dark:text-purple-300 mb-2">💡 Did You Know?</h3>
+                                    <AnimateIn key={currentFact} from="opacity-0 translate-y-2" to="opacity-100 translate-y-0" duration="duration-500">
+                                        <p className="text-purple-800 dark:text-purple-200 font-medium text-xs sm:text-sm">{funFacts[currentFact]}</p>
+                                    </AnimateIn>
+                                </div>
+                            </AnimateIn>
                         </div>
-                        <h1 className="text-7xl font-bold text-gray-800 dark:text-white mt-6 bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-                            AI Quiz Clash
-                        </h1>
-                        <p className="text-gray-500 dark:text-gray-300 mt-3 text-2xl">Where knowledge meets competition</p>
-                    </AnimateIn>
+
+                        {/* Title - Center */}
+                        <div className="lg:col-span-6 flex flex-col items-center order-1 lg:order-2">
+                            <AnimateIn>
+                                <div className="flex flex-col items-center justify-center">
+                                    <div className="relative flex items-center justify-center">
+                                        <BrainCircuit className="w-12 h-12 sm:w-16 sm:h-16 lg:w-20 lg:h-20 text-indigo-500 animate-pulse" />
+                                        <div className="absolute -top-1 -right-1 sm:-top-2 sm:-right-2 w-4 h-4 sm:w-6 sm:h-6 bg-green-500 rounded-full animate-bounce flex items-center justify-center">
+                                            <span className="text-white text-xs font-bold">∞</span>
+                                        </div>
+                                    </div>
+                                    <h1 className="text-2xl sm:text-3xl lg:text-5xl font-bold text-gray-800 dark:text-white mt-2 lg:mt-3 bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent text-center">
+                                        AI Quiz Clash
+                                    </h1>
+                                    <p className="text-gray-500 dark:text-gray-300 mt-1 lg:mt-2 text-sm sm:text-base lg:text-lg text-center">Where knowledge meets competition</p>
+                                </div>
+                            </AnimateIn>
+                        </div>
+
+                        {/* Premium Feature - Right */}
+                        <div className="lg:col-span-3 flex justify-center lg:justify-end order-3 mb-4 lg:mb-0">
+                            <AnimateIn from="opacity-0 translate-x-12" to="opacity-100 translate-x-0" duration="duration-800">
+                                <div className="relative bg-gradient-to-r from-gray-400/25 to-gray-600/25 dark:from-gray-600/25 dark:to-gray-800/25 backdrop-blur-sm rounded-xl p-3 sm:p-4 border border-gray-300/60 dark:border-gray-600/60 w-full max-w-xs">
+                                    {/* Lock overlay */}
+                                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm rounded-xl flex items-center justify-center">
+                                        <div className="text-center text-white">
+                                            <div className="text-xl sm:text-2xl mb-1">🔒</div>
+                                            <h3 className="text-xs sm:text-sm font-bold mb-1">Premium Feature</h3>
+                                            <p className="text-xs opacity-90 mb-2">Unlock analytics</p>
+                                            <button 
+                                                onClick={handleUpgradeClick}
+                                                className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white font-bold py-1 px-2 sm:py-1 sm:px-3 rounded-lg hover:from-yellow-600 hover:to-orange-600 transition-all duration-300 transform hover:scale-105 shadow-lg text-xs">
+                                                Upgrade Now
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {/* Background content (blurred) */}
+                                    <h3 className="text-xs sm:text-sm font-bold text-gray-800 dark:text-white mb-2">📈 Analytics</h3>
+                                    <div className="space-y-2 opacity-50">
+                                        <div className="bg-white/50 dark:bg-gray-700/50 p-1 rounded">
+                                            <p className="text-xs font-semibold">Performance</p>
+                                            <div className="w-full h-1 bg-gray-200 rounded mt-1"></div>
+                                        </div>
+                                        <div className="bg-white/50 dark:bg-gray-700/50 p-1 rounded">
+                                            <p className="text-xs font-semibold">Categories</p>
+                                            <div className="grid grid-cols-3 gap-1 mt-1">
+                                                <div className="h-1 bg-blue-300 rounded"></div>
+                                                <div className="h-1 bg-green-300 rounded"></div>
+                                                <div className="h-1 bg-purple-300 rounded"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </AnimateIn>
+                        </div>
+                    </div>
                 </div>
 
-                {/* Center - Main "Join the Battle" Section */}
-                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl px-6">
-                    <AnimateIn from="opacity-0 scale-90" to="opacity-100 scale-100">
-                        <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-lg rounded-3xl p-12 shadow-2xl border-2 border-indigo-200/50 dark:border-indigo-700/50">
-                            <h2 className="text-4xl font-bold text-gray-800 dark:text-white mb-8 text-center flex items-center justify-center gap-4">
-                                <Users className="w-10 h-10 text-indigo-500" />
-                                Join the Battle
-                            </h2>
-                            <div className="space-y-6">
-                                <input
-                                    type="text"
-                                    placeholder="Enter your warrior name"
-                                    value={playerName}
-                                    onChange={(e) => setPlayerName(e.target.value)}
-                                    className="w-full px-6 py-4 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-200 border-3 border-gray-200 dark:border-gray-600 focus:border-indigo-500 rounded-xl outline-none transition-all duration-300 text-center text-xl font-medium"
-                                />
-                                {isJoining && (
-                                    <AnimateIn from="opacity-0 scale-95" to="opacity-100 scale-100" duration="duration-300">
+                {/* Main content grid - responsive layout, full height for alignment */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-stretch min-h-[60vh] lg:min-h-[60vh]" style={{height: '60vh'}}>
+                    {/* Left Column - Trending & Stats */}
+                    <div className="lg:col-span-3 flex flex-col h-full gap-6">
+                        {/* Trending Topics */}
+                        <AnimateIn from="opacity-0 -translate-x-12 translate-y-8" to="opacity-100 translate-x-0 translate-y-0" duration="duration-900">
+                            <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-sm rounded-xl p-3 sm:p-4 shadow-xl border border-gray-200/50 dark:border-gray-700/50">
+                                <h3 className="text-sm sm:text-lg font-bold text-gray-800 dark:text-white mb-2 sm:mb-3 flex items-center gap-2">
+                                    🔥 Trending Now
+                                </h3>
+                                <div className="space-y-2">
+                                    {trendingTopics.slice(0, 3).map((topic, index) => (
+                                        <AnimateIn key={topic.topic} from="opacity-0 -translate-x-4" to="opacity-100 translate-x-0" duration="duration-300">
+                                            <div 
+                                                style={{ transitionDelay: `${index * 150}ms` }} 
+                                                className="flex items-center justify-between p-2 bg-gray-50/90 dark:bg-gray-700/90 rounded-lg hover:bg-gray-100/90 dark:hover:bg-gray-600/90 transition-all duration-200 cursor-pointer transform hover:scale-105"
+                                                onClick={() => handleQuickPlay(topic.topic)}
+                                            >
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-lg">{topic.icon}</span>
+                                                    <div>
+                                                        <span className="font-semibold text-gray-800 dark:text-gray-200 block text-xs sm:text-sm">{topic.topic}</span>
+                                                        <span className="text-xs text-gray-500 dark:text-gray-400">{topic.difficulty} Level</span>
+                                                    </div>
+                                                </div>
+                                                <span className="text-xs text-indigo-600 dark:text-indigo-400 font-bold">{topic.players}</span>
+                                            </div>
+                                        </AnimateIn>
+                                    ))}
+                                </div>
+                            </div>
+                        </AnimateIn>
+                        {/* Live Stats */}
+                        <AnimateIn from="opacity-0 -translate-x-12 translate-y-8" to="opacity-100 translate-x-0 translate-y-0" duration="duration-1000">
+                            <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-sm rounded-xl p-3 sm:p-4 shadow-xl border border-gray-200/50 dark:border-gray-700/50">
+                                <h3 className="text-sm sm:text-base font-bold text-gray-800 dark:text-white mb-2 sm:mb-3">📊 Live Stats</h3>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <div className="text-center">
+                                        <p className="text-lg sm:text-2xl font-bold text-indigo-600 dark:text-indigo-400">4.2k</p>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Players Online</p>
+                                    </div>
+                                    <div className="text-center">
+                                        <p className="text-lg sm:text-2xl font-bold text-green-600 dark:text-green-400">127</p>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Active Rooms</p>
+                                    </div>
+                                    <div className="text-center">
+                                        <p className="text-lg sm:text-2xl font-bold text-purple-600 dark:text-purple-400">∞</p>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Questions</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </AnimateIn>
+                    </div>
+
+                    {/* Center Column - Main "Join the Battle" Section - Vertically centered */}
+                    <div className="lg:col-span-6 flex flex-col h-full">
+                        <div className="flex-1 flex flex-col justify-center items-center">
+                            <AnimateIn from="opacity-0 scale-90" to="opacity-100 scale-100">
+                                <div className="w-full max-w-xl bg-white/95 dark:bg-gray-800/95 backdrop-blur-lg rounded-2xl p-4 sm:p-6 lg:p-8 shadow-2xl border-2 border-indigo-200/60 dark:border-indigo-700/60">
+                                    <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-800 dark:text-white mb-4 lg:mb-6 text-center flex items-center justify-center gap-2 lg:gap-3">
+                                        <Users className="w-8 h-8 sm:w-10 sm:h-10 text-indigo-500" />
+                                        Join the Battle
+                                    </h2>
+                                    <div className="space-y-4 sm:space-y-5">
                                         <input
                                             type="text"
-                                            placeholder="Enter battle code"
-                                            maxLength="6"
-                                            value={joinCode}
-                                            onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                                            className="w-full px-6 py-4 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-200 border-3 border-gray-200 dark:border-gray-600 focus:border-indigo-500 rounded-xl outline-none transition-all duration-300 text-center font-mono tracking-widest text-xl"
+                                            placeholder="Enter your warrior name"
+                                            value={playerName}
+                                            onChange={(e) => setPlayerName(e.target.value)}
+                                            className="w-full px-4 py-3 sm:px-6 sm:py-4 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-200 border-3 border-gray-200 dark:border-gray-600 focus:border-indigo-500 rounded-xl outline-none transition-all duration-300 text-center text-lg sm:text-xl font-medium"
                                         />
-                                    </AnimateIn>
-                                )}
-                                <button 
-                                    onClick={isJoining ? () => handleJoinRoom(joinCode) : handleCreateRoom} 
-                                    disabled={!playerName || (isJoining && !joinCode.trim())}
-                                    className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold py-6 px-6 rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all duration-300 transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-3 text-2xl shadow-2xl">
-                                    {isJoining ? <>Join Battle <ArrowRight className="w-7 h-7" /></> : 'Create Battle Room'}
-                                </button>
-                                <button onClick={() => setIsJoining(!isJoining)} className="text-center text-lg text-gray-500 dark:text-gray-400 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors duration-200 w-full font-medium">
-                                    {isJoining ? 'or create a new battle room' : 'Have a battle code? Join instead'}
-                                </button>
-                            </div>
+                                        {isJoining && (
+                                            <AnimateIn from="opacity-0 scale-95" to="opacity-100 scale-100" duration="duration-300">
+                                                <input
+                                                    type="text"
+                                                    placeholder="Enter battle code"
+                                                    maxLength="6"
+                                                    value={joinCode}
+                                                    onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                                                    className="w-full px-4 py-3 sm:px-6 sm:py-4 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-200 border-3 border-gray-200 dark:border-gray-600 focus:border-indigo-500 rounded-xl outline-none transition-all duration-300 text-center font-mono tracking-widest text-lg sm:text-xl"
+                                                />
+                                            </AnimateIn>
+                                        )}
+                                        <button 
+                                            onClick={isJoining ? () => handleJoinRoom(joinCode) : handleCreateRoom} 
+                                            disabled={!playerName || (isJoining && !joinCode.trim())}
+                                            className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold py-4 sm:py-5 px-4 sm:px-6 rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all duration-300 transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2 text-lg sm:text-xl shadow-2xl">
+                                            {isJoining ? <>Join Battle <ArrowRight className="w-5 h-5 sm:w-6 sm:h-6" /></> : 'Create Battle Room'}
+                                        </button>
+                                        <button onClick={() => setIsJoining(!isJoining)} className="text-center text-base sm:text-lg text-gray-500 dark:text-gray-400 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors duration-200 w-full font-medium">
+                                            {isJoining ? 'or create a new battle room' : 'Have a battle code? Join instead'}
+                                        </button>
+                                    </div>
+                                </div>
+                            </AnimateIn>
                         </div>
-                    </AnimateIn>
-                </div>
-
-                {/* Quick Play - Under Join the Battle Section (smaller and properly positioned) */}
-                <div className="absolute top-[75%] left-1/2 transform -translate-x-1/2 w-full max-w-3xl px-6">
-                    <AnimateIn from="opacity-0 translate-y-8" to="opacity-100 translate-y-0" duration="duration-800">
-                        <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-sm rounded-2xl p-4 shadow-xl border border-gray-200/50 dark:border-gray-700/50">
-                            <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-4 text-center flex items-center justify-center gap-2">
+                        <div className="flex-1 flex flex-col justify-end w-full items-center">
+                            {/* Quick Play Modes */}
+                            <AnimateIn from="opacity-0 translate-y-8" to="opacity-100 translate-y-0" duration="duration-800">
+                        <div className="w-full max-w-2xl bg-white/85 dark:bg-gray-800/85 backdrop-blur-sm rounded-2xl p-3 sm:p-4 lg:p-6 shadow-xl border border-gray-200/50 dark:border-gray-700/50" style={{height: '75%'}}>
+                            <h3 className="text-lg sm:text-xl font-bold text-gray-800 dark:text-white mb-2 text-center flex items-center justify-center gap-2">
                                 ⚡ Quick Play Modes
                             </h3>
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                                 {quickPlayTopics.map((item, index) => (
                                     <AnimateIn key={item.topic} from="opacity-0 scale-90" to="opacity-100 scale-100" duration="duration-300">
                                         <button
                                             onClick={() => handleQuickPlay(item.topic)}
                                             disabled={!playerName}
                                             style={{ transitionDelay: `${index * 100}ms` }}
-                                            className={`p-4 rounded-xl bg-gradient-to-br ${item.color} text-white font-semibold transition-all duration-300 transform hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none shadow-lg`}
+                                            className={`p-2 sm:p-3 rounded-xl bg-gradient-to-br ${item.color} text-white font-semibold transition-all duration-300 transform hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none shadow-lg`}
                                         >
-                                            <div className="text-3xl mb-2">{item.emoji}</div>
-                                            <div className="text-sm font-bold">{item.topic}</div>
+                                            <div className="text-2xl sm:text-3xl mb-1">{item.emoji}</div>
+                                            <div className="text-xs sm:text-sm font-bold">{item.topic}</div>
                                         </button>
                                     </AnimateIn>
                                 ))}
                             </div>
                         </div>
-                    </AnimateIn>
-                </div>
-
-                {/* Top Left - Did You Know */}
-                <div className="absolute top-20 left-8 w-80">
-                    <AnimateIn from="opacity-0 -translate-x-12" to="opacity-100 translate-x-0" duration="duration-800">
-                        <div className="bg-gradient-to-r from-purple-500/25 to-blue-500/25 dark:from-purple-600/25 dark:to-blue-700/25 backdrop-blur-sm rounded-2xl p-6 border border-purple-300/60 dark:border-purple-600/60">
-                            <h3 className="text-lg font-bold text-purple-700 dark:text-purple-300 mb-3">💡 Did You Know?</h3>
-                            <AnimateIn key={currentFact} from="opacity-0 translate-y-2" to="opacity-100 translate-y-0" duration="duration-500">
-                                <p className="text-purple-800 dark:text-purple-200 font-medium text-lg">{funFacts[currentFact]}</p>
                             </AnimateIn>
                         </div>
-                    </AnimateIn>
-                </div>
+                    </div>
 
-                {/* Left Middle - Trending Topics (under Did You Know) */}
-                <div className="absolute top-80 left-8 w-80">
-                    <AnimateIn from="opacity-0 -translate-x-12 translate-y-8" to="opacity-100 translate-x-0 translate-y-0" duration="duration-900">
-                        <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-sm rounded-2xl p-6 shadow-xl border border-gray-200/50 dark:border-gray-700/50">
-                            <h3 className="text-2xl font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
-                                🔥 Trending Now
-                            </h3>
-                            <div className="space-y-3">
-                                {trendingTopics.slice(0, 3).map((topic, index) => (
-                                    <AnimateIn key={topic.topic} from="opacity-0 -translate-x-4" to="opacity-100 translate-x-0" duration="duration-300">
-                                        <div 
-                                            style={{ transitionDelay: `${index * 150}ms` }} 
-                                            className="flex items-center justify-between p-3 bg-gray-50/90 dark:bg-gray-700/90 rounded-xl hover:bg-gray-100/90 dark:hover:bg-gray-600/90 transition-all duration-200 cursor-pointer transform hover:scale-105"
-                                            onClick={() => handleQuickPlay(topic.topic)}
-                                        >
-                                            <div className="flex items-center gap-3">
-                                                <span className="text-2xl">{topic.icon}</span>
-                                                <div>
-                                                    <span className="font-semibold text-gray-800 dark:text-gray-200 block">{topic.topic}</span>
-                                                    <span className="text-xs text-gray-500 dark:text-gray-400">{topic.difficulty} Level</span>
-                                                </div>
-                                            </div>
-                                            <span className="text-sm text-indigo-600 dark:text-indigo-400 font-bold">{topic.players}</span>
-                                        </div>
-                                    </AnimateIn>
-                                ))}
-                            </div>
-                        </div>
-                    </AnimateIn>
-                </div>
-
-                {/* Left Bottom - Live Stats (under Trending) */}
-                <div className="absolute bottom-32 left-8 w-80">
-                    <AnimateIn from="opacity-0 -translate-x-12 translate-y-8" to="opacity-100 translate-x-0 translate-y-0" duration="duration-1000">
-                        <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-sm rounded-2xl p-6 shadow-xl border border-gray-200/50 dark:border-gray-700/50">
-                            <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4">📊 Live Stats</h3>
-                            <div className="grid grid-cols-3 gap-3">
-                                <div className="text-center">
-                                    <p className="text-3xl font-bold text-indigo-600 dark:text-indigo-400">4.2k</p>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Players Online</p>
+                    {/* Right Column - Daily Challenge, Hall of Fame - Start from top */}
+                    <div className="lg:col-span-3 flex flex-col h-full gap-6">
+                        {/* Daily Challenge */}
+                        <AnimateIn from="opacity-0 translate-x-12" to="opacity-100 translate-x-0" duration="duration-800">
+                            <div className="bg-gradient-to-br from-yellow-400/25 to-orange-500/25 dark:from-yellow-600/25 dark:to-orange-700/25 backdrop-blur-sm rounded-xl p-3 sm:p-4 shadow-xl border border-yellow-300/60 dark:border-yellow-600/60">
+                                <div className="flex items-center justify-between mb-2 sm:mb-3">
+                                    <h3 className="text-sm sm:text-lg font-bold text-gray-800 dark:text-white flex items-center gap-1 sm:gap-2">
+                                        🏆 Daily Challenge
+                                    </h3>
+                                    <span className="text-xs font-mono text-orange-600 dark:text-orange-400 bg-orange-100 dark:bg-orange-900/60 px-2 py-1 rounded-lg">
+                                        {dailyChallenge.timeLeft}
+                                    </span>
                                 </div>
-                                <div className="text-center">
-                                    <p className="text-3xl font-bold text-green-600 dark:text-green-400">127</p>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Active Rooms</p>
-                                </div>
-                                <div className="text-center">
-                                    <p className="text-3xl font-bold text-purple-600 dark:text-purple-400">∞</p>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Questions</p>
-                                </div>
-                            </div>
-                        </div>
-                    </AnimateIn>
-                </div>
-
-                {/* Top Right - Detailed Analytics (Premium Feature) */}
-                <div className="absolute top-20 right-8 w-96">
-                    <AnimateIn from="opacity-0 translate-x-12" to="opacity-100 translate-x-0" duration="duration-800">
-                        <div className="relative bg-gradient-to-br from-gray-400/20 to-gray-600/20 dark:from-gray-600/20 dark:to-gray-800/20 backdrop-blur-sm rounded-2xl p-6 shadow-xl border border-gray-300/30 dark:border-gray-600/30">
-                            {/* Lock overlay */}
-                            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm rounded-2xl flex items-center justify-center">
-                                <div className="text-center text-white">
-                                    <div className="text-4xl mb-3">🔒</div>
-                                    <h3 className="text-xl font-bold mb-2">Premium Feature</h3>
-                                    <p className="text-sm opacity-90 mb-4">Unlock detailed analytics with subscription</p>
+                                <div className="space-y-2 sm:space-y-3">
+                                    <p className="text-gray-700 dark:text-gray-300 text-xs sm:text-sm">
+                                        <span className="font-bold">Topic:</span> {dailyChallenge.topic}
+                                    </p>
+                                    <p className="text-gray-700 dark:text-gray-300 text-xs sm:text-sm">
+                                        <span className="font-bold">Reward:</span> {dailyChallenge.reward}
+                                    </p>
                                     <button 
-                                        onClick={handleUpgradeClick}
-                                        className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white font-bold py-2 px-6 rounded-lg hover:from-yellow-600 hover:to-orange-600 transition-all duration-300 transform hover:scale-105 shadow-lg">
-                                        Upgrade Now
+                                        onClick={() => handleQuickPlay(dailyChallenge.topic)}
+                                        disabled={!playerName}
+                                        className="w-full bg-gradient-to-r from-yellow-500 to-orange-500 text-white font-bold py-2 sm:py-3 px-3 rounded-xl hover:from-yellow-600 hover:to-orange-600 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none shadow-lg text-xs sm:text-sm">
+                                        Accept Challenge
                                     </button>
                                 </div>
                             </div>
-                            {/* Background content (blurred) */}
-                            <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4">📈 Detailed Analytics</h3>
-                            <div className="space-y-4 opacity-50">
-                                <div className="bg-white/50 dark:bg-gray-700/50 p-3 rounded-lg">
-                                    <p className="text-sm font-semibold">Performance Trends</p>
-                                    <div className="w-full h-4 bg-gray-200 rounded mt-2"></div>
-                                </div>
-                                <div className="bg-white/50 dark:bg-gray-700/50 p-3 rounded-lg">
-                                    <p className="text-sm font-semibold">Category Breakdown</p>
-                                    <div className="grid grid-cols-3 gap-2 mt-2">
-                                        <div className="h-3 bg-blue-300 rounded"></div>
-                                        <div className="h-3 bg-green-300 rounded"></div>
-                                        <div className="h-3 bg-purple-300 rounded"></div>
-                                    </div>
-                                </div>
-                                <div className="bg-white/50 dark:bg-gray-700/50 p-3 rounded-lg">
-                                    <p className="text-sm font-semibold">Competitive Ranking</p>
-                                    <div className="w-2/3 h-3 bg-yellow-300 rounded mt-2"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </AnimateIn>
-                </div>
-
-                {/* Mid Right - Daily Challenge (moved lower to avoid overlap) */}
-                <div className="absolute top-[28rem] right-8 w-96">
-                    <AnimateIn from="opacity-0 translate-x-12" to="opacity-100 translate-x-0" duration="duration-800">
-                        <div className="bg-gradient-to-br from-yellow-400/25 to-orange-500/25 dark:from-yellow-600/25 dark:to-orange-700/25 backdrop-blur-sm rounded-2xl p-6 shadow-xl border border-yellow-300/60 dark:border-yellow-600/60">
-                            <div className="flex items-center justify-between mb-4">
-                                <h3 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
-                                    🏆 Daily Challenge
+                        </AnimateIn>
+                        {/* Hall of Fame */}
+                        <AnimateIn from="opacity-0 translate-x-12 translate-y-8" to="opacity-100 translate-x-0 translate-y-0" duration="duration-900">
+                            <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-sm rounded-xl p-3 sm:p-4 shadow-xl border border-gray-200/50 dark:border-gray-700/50">
+                                <h3 className="text-sm sm:text-lg font-bold text-gray-800 dark:text-white mb-2 sm:mb-3 flex items-center gap-2">
+                                    👑 Hall of Fame
                                 </h3>
-                                <span className="text-sm font-mono text-orange-600 dark:text-orange-400 bg-orange-100 dark:bg-orange-900/60 px-3 py-2 rounded-lg">
-                                    {dailyChallenge.timeLeft}
-                                </span>
-                            </div>
-                            <div className="space-y-4">
-                                <p className="text-gray-700 dark:text-gray-300 text-lg">
-                                    <span className="font-bold">Topic:</span> {dailyChallenge.topic}
-                                </p>
-                                <p className="text-gray-700 dark:text-gray-300 text-lg">
-                                    <span className="font-bold">Reward:</span> {dailyChallenge.reward}
-                                </p>
-                                <button 
-                                    onClick={() => handleQuickPlay(dailyChallenge.topic)}
-                                    disabled={!playerName}
-                                    className="w-full bg-gradient-to-r from-yellow-500 to-orange-500 text-white font-bold py-4 px-4 rounded-xl hover:from-yellow-600 hover:to-orange-600 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none shadow-lg text-lg">
-                                    Accept Challenge
-                                </button>
-                            </div>
-                        </div>
-                    </AnimateIn>
-                </div>
-
-                {/* Bottom Right - Hall of Fame (fixed spacing) */}
-                <div className="absolute bottom-8 right-8 w-96">
-                    <AnimateIn from="opacity-0 translate-x-12 translate-y-8" to="opacity-100 translate-x-0 translate-y-0" duration="duration-900">
-                        <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-sm rounded-2xl p-6 shadow-xl border border-gray-200/50 dark:border-gray-700/50">
-                            <h3 className="text-2xl font-bold text-gray-800 dark:text-white mb-4 flex items-center gap-2">
-                                👑 Hall of Fame
-                            </h3>
-                            <div className="space-y-3">
-                                {leaderboard.slice(0, 3).map((player, index) => (
-                                    <AnimateIn key={player.name} from="opacity-0 translate-x-4" to="opacity-100 translate-x-0" duration="duration-300">
-                                        <div style={{ transitionDelay: `${index * 150}ms` }} className="flex items-center justify-between p-3 bg-gray-50/90 dark:bg-gray-700/90 rounded-xl">
-                                            <div className="flex items-center gap-3">
-                                                <span className="w-8 text-center font-bold text-xl">
-                                                    {index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉'}
-                                                </span>
-                                                <span className="text-2xl">{player.avatar}</span>
-                                                <div>
-                                                    <span className="font-semibold text-gray-800 dark:text-gray-200 block">{player.name}</span>
-                                                    <span className="text-xs text-gray-500 dark:text-gray-400">🔥 {player.streak} streak</span>
-                                                </div>
-                                            </div>
-                                            <span className="font-bold text-indigo-600 dark:text-indigo-400">{player.score.toLocaleString()}</span>
-                                        </div>
-                                    </AnimateIn>
-                                ))}
-                            </div>
-                        </div>
-                    </AnimateIn>
-                </div>
-
-                {/* Pricing Modal */}
-                {showPricingModal && (
-                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                        <AnimateIn from="opacity-0 scale-90" to="opacity-100 scale-100" duration="duration-300">
-                            <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
-                                <div className="flex justify-between items-center mb-8">
-                                    <h2 className="text-3xl font-bold text-gray-800 dark:text-white">Choose Your Premium Plan</h2>
-                                    <button 
-                                        onClick={() => setShowPricingModal(false)}
-                                        className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl"
-                                    >
-                                        ✕
-                                    </button>
-                                </div>
-                                
-                                <div className="grid md:grid-cols-3 gap-6">
-                                    {pricingPlans.map((plan) => (
-                                        <div key={plan.name} className={`relative rounded-2xl p-6 border-2 transition-all duration-300 hover:scale-105 ${
-                                            plan.popular 
-                                                ? 'border-yellow-500 bg-gradient-to-br from-yellow-50 to-orange-50 dark:from-yellow-900/20 dark:to-orange-900/20' 
-                                                : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700'
-                                        }`}>
-                                            {plan.popular && (
-                                                <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
-                                                    <span className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-4 py-1 rounded-full text-sm font-bold">
-                                                        Most Popular
+                                <div className="space-y-2">
+                                    {leaderboard.slice(0, 3).map((player, index) => (
+                                        <AnimateIn key={player.name} from="opacity-0 translate-x-4" to="opacity-100 translate-x-0" duration="duration-300">
+                                            <div style={{ transitionDelay: `${index * 150}ms` }} className="flex items-center justify-between p-2 bg-gray-50/90 dark:bg-gray-700/90 rounded-lg">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="w-5 text-center font-bold text-sm">
+                                                        {index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉'}
                                                     </span>
+                                                    <span className="text-lg">{player.avatar}</span>
+                                                    <div>
+                                                        <span className="font-semibold text-gray-800 dark:text-gray-200 block text-xs sm:text-sm">{player.name}</span>
+                                                        <span className="text-xs text-gray-500 dark:text-gray-400">🔥 {player.streak} streak</span>
+                                                    </div>
                                                 </div>
-                                            )}
-                                            
-                                            <div className="text-center mb-6">
-                                                <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2">{plan.name}</h3>
-                                                <div className="text-3xl font-bold text-indigo-600 dark:text-indigo-400">
-                                                    {plan.price}<span className="text-lg text-gray-500">{plan.duration}</span>
-                                                </div>
+                                                <span className="font-bold text-indigo-600 dark:text-indigo-400 text-xs sm:text-sm">{player.score.toLocaleString()}</span>
                                             </div>
-                                            
-                                            <ul className="space-y-3 mb-6">
-                                                {plan.features.map((feature, featureIndex) => (
-                                                    <li key={featureIndex} className="flex items-center gap-3">
-                                                        <span className="text-green-500">✓</span>
-                                                        <span className="text-gray-700 dark:text-gray-300">{feature}</span>
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                            
-                                            <button
-                                                onClick={() => handlePlanSelect(plan)}
-                                                className={`w-full py-3 px-4 rounded-xl font-bold transition-all duration-300 transform hover:scale-105 ${
-                                                    plan.popular
-                                                        ? 'bg-gradient-to-r from-yellow-500 to-orange-500 text-white hover:from-yellow-600 hover:to-orange-600'
-                                                        : 'bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500'
-                                                }`}
-                                            >
-                                                {plan.popular ? 'Get Pro Now' : 'Select Plan'}
-                                            </button>
-                                        </div>
+                                        </AnimateIn>
                                     ))}
                                 </div>
-                                
-                                <div className="mt-8 text-center">
-                                    <p className="text-gray-600 dark:text-gray-400 text-sm">
-                                        All plans include 7-day free trial • Cancel anytime • Secure payment with Razorpay
+                            </div>
+                        </AnimateIn>
+                    </div>
+                </div>
+
+                {/* Bottom Features - 3-column grid for symmetry */}
+                <div className="mt-4 lg:mt-6 grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-end">
+                    <div className="lg:col-span-3"></div>
+                    <div className="lg:col-span-6 flex flex-col items-center">
+                        <AnimateIn from="opacity-0 translate-y-8" to="opacity-100 translate-y-0" duration="duration-1200">
+                            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
+                                <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl px-3 sm:px-4 py-2 shadow-lg border border-gray-200/50 dark:border-gray-700/50">
+                                    <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 text-center">
+                                        <span className="font-bold text-indigo-600 dark:text-indigo-400">Real-time</span> multiplayer experience
+                                    </p>
+                                </div>
+                                <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl px-3 sm:px-4 py-2 shadow-lg border border-gray-200/50 dark:border-gray-700/50">
+                                    <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 text-center">
+                                        <span className="font-bold text-purple-600 dark:text-purple-400">AI-powered</span> question generation
                                     </p>
                                 </div>
                             </div>
                         </AnimateIn>
                     </div>
-                )}
+                    <div className="lg:col-span-3"></div>
+                </div>
+            </div>
 
-                {/* Bottom Center - Additional Features */}
-                <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2">
-                    <AnimateIn from="opacity-0 translate-y-8" to="opacity-100 translate-y-0" duration="duration-1200">
-                        <div className="flex gap-6">
-                            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl px-6 py-3 shadow-lg border border-gray-200/50 dark:border-gray-700/50">
-                                <p className="text-sm text-gray-600 dark:text-gray-400 text-center">
-                                    <span className="font-bold text-indigo-600 dark:text-indigo-400">Real-time</span> multiplayer experience
-                                </p>
+            {/* Pricing Modal */}
+            {showPricingModal && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <AnimateIn from="opacity-0 scale-90" to="opacity-100 scale-100" duration="duration-300">
+                        <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+                            <div className="flex justify-between items-center mb-8">
+                                <h2 className="text-3xl font-bold text-gray-800 dark:text-white">Choose Your Premium Plan</h2>
+                                <button 
+                                    onClick={() => setShowPricingModal(false)}
+                                    className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl"
+                                >
+                                    ✕
+                                </button>
                             </div>
-                            <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl px-6 py-3 shadow-lg border border-gray-200/50 dark:border-gray-700/50">
-                                <p className="text-sm text-gray-600 dark:text-gray-400 text-center">
-                                    <span className="font-bold text-purple-600 dark:text-purple-400">AI-powered</span> question generation
+                            
+                            <div className="grid md:grid-cols-3 gap-6">
+                                {pricingPlans.map((plan) => (
+                                    <div key={plan.name} className={`relative rounded-2xl p-6 border-2 transition-all duration-300 hover:scale-105 ${
+                                        plan.popular 
+                                            ? 'border-yellow-500 bg-gradient-to-br from-yellow-50 to-orange-50 dark:from-yellow-900/20 dark:to-orange-900/20' 
+                                            : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700'
+                                    }`}>
+                                        {plan.popular && (
+                                            <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
+                                                <span className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-4 py-1 rounded-full text-sm font-bold">
+                                                    Most Popular
+                                                </span>
+                                            </div>
+                                        )}
+                                        
+                                        <div className="text-center mb-6">
+                                            <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2">{plan.name}</h3>
+                                            <div className="text-3xl font-bold text-indigo-600 dark:text-indigo-400">
+                                                {plan.price}<span className="text-lg text-gray-500">{plan.duration}</span>
+                                            </div>
+                                        </div>
+                                        
+                                        <ul className="space-y-3 mb-6">
+                                            {plan.features.map((feature, featureIndex) => (
+                                                <li key={featureIndex} className="flex items-center gap-3">
+                                                    <span className="text-green-500">✓</span>
+                                                    <span className="text-gray-700 dark:text-gray-300">{feature}</span>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                        
+                                        <button
+                                            onClick={() => handlePlanSelect(plan)}
+                                            className={`w-full py-3 px-4 rounded-xl font-bold transition-all duration-300 transform hover:scale-105 ${
+                                                plan.popular
+                                                    ? 'bg-gradient-to-r from-yellow-500 to-orange-500 text-white hover:from-yellow-600 hover:to-orange-600'
+                                                    : 'bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500'
+                                            }`}
+                                        >
+                                            {plan.popular ? 'Get Pro Now' : 'Select Plan'}
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                            
+                            <div className="mt-8 text-center">
+                                <p className="text-gray-600 dark:text-gray-400 text-sm">
+                                    All plans include 7-day free trial • Cancel anytime • Secure payment with Razorpay
                                 </p>
                             </div>
                         </div>
                     </AnimateIn>
                 </div>
-            </div>
+            )}
         </div>
     );
 };
@@ -602,54 +609,68 @@ const GameScreen = ({ roomData, userId, handleAnswer }) => {
 
     const [timer, setTimer] = useState(10);
     const [isRevealed, setIsRevealed] = useState(false);
+    const intervalRef = useRef(null);
+    const hasAnsweredRef = useRef(false);
+    const currentQuestionRef = useRef(currentQuestionIndex);
 
     useEffect(() => {
         setIsRevealed(allPlayersAnswered);
     }, [allPlayersAnswered]);
 
-    // Separate effect for tracking if current player has answered
+    // Track if current player has answered
     useEffect(() => {
-        // Stop timer if player has answered
-        if (playerAnswerData) {
-            // Player has answered, no need to continue timer
-            return;
-        }
+        hasAnsweredRef.current = !!playerAnswerData;
     }, [playerAnswerData]);
 
+    // Timer effect - only depends on question changes
     useEffect(() => {
-        // Reset timer only when question changes
-        setTimer(10);
-        setIsRevealed(false);
-        
-        const interval = setInterval(() => {
-            setTimer(t => {
-                if (t > 1) return t - 1;
-                // Auto-submit if time runs out and player hasn't answered
-                handleAnswer(null, 10);
-                clearInterval(interval);
-                return 0;
-            });
-        }, 1000);
-
-        return () => clearInterval(interval);
-    }, [currentQuestionIndex, handleAnswer]); // Only reset when question changes
-
-    // Stop timer when player answers
-    useEffect(() => {
-        if (playerAnswerData) {
-            setTimer(prev => prev); // Keep current timer value but stop it from running
+        // Only reset if this is actually a new question
+        if (currentQuestionRef.current !== currentQuestionIndex) {
+            currentQuestionRef.current = currentQuestionIndex;
+            hasAnsweredRef.current = false;
+            setTimer(10);
+            setIsRevealed(false);
+            
+            // Clear any existing interval
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+                intervalRef.current = null;
+            }
+            
+            // Start new timer - runs independently for full 10 seconds
+            intervalRef.current = setInterval(() => {
+                setTimer(t => {
+                    if (t > 1) {
+                        return t - 1;
+                    } else {
+                        // Auto-submit if time runs out and player hasn't answered
+                        if (!hasAnsweredRef.current) {
+                            handleAnswer(null, 10);
+                        }
+                        // Keep timer at 0 but don't stop the interval
+                        return 0;
+                    }
+                });
+            }, 1000);
         }
-    }, [playerAnswerData]);
+
+        return () => {
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+                intervalRef.current = null;
+            }
+        };
+    }, [currentQuestionIndex, handleAnswer]);
 
     const onAnswerClick = (optionIndex) => {
         if (playerAnswerData) return;
-        const timeTaken = 10 - timer;
+        const timeTaken = Math.max(0, 10 - timer);
         handleAnswer(optionIndex, timeTaken);
     };
 
     // Function to get current multiplier based on timer
     const getCurrentMultiplier = () => {
-        const timeTaken = 10 - timer;
+        const timeTaken = Math.max(0, 10 - timer);
         if (timeTaken >= 0 && timeTaken <= 2) {
             return 2;
         } else if (timeTaken > 2 && timeTaken <= 5) {
@@ -707,7 +728,7 @@ const GameScreen = ({ roomData, userId, handleAnswer }) => {
                         <div className="bg-indigo-600 h-2.5 rounded-full" style={{ width: `${((currentQuestionIndex + 1) / roomData.questions.length) * 100}%` }}></div>
                     </div>
                     <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-4">
-                        <div className="bg-yellow-400 h-1.5 rounded-full transition-all duration-1000 linear" style={{ width: `${(timer/10)*100}%`}}></div>
+                        <div className="bg-yellow-400 h-1.5 rounded-full transition-all duration-1000 linear" style={{ width: `${Math.max(0, (timer/10)*100)}%`}}></div>
                     </div>
                     
                     {/* Dynamic Multiplier Display */}
