@@ -1,27 +1,78 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { doc, setDoc, onSnapshot, updateDoc, serverTimestamp, runTransaction } from 'firebase/firestore';
-import { ArrowRight, Users, Crown, Loader, BrainCircuit, Check, X, Copy, PartyPopper } from 'lucide-react';
-import { auth, db } from './firebase';
+import { ArrowRight, Users, Crown, Loader, Check, X, Copy, PartyPopper, QrCode, Share2, Smartphone, Sparkles, Home, RotateCcw } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
+import confetti from 'canvas-confetti';
+import socketService from './socket';
 
-// --- Firebase Configuration ---
+// --- Constants ---
+const COLORS = {
+    bgPrimary: '#0F172A',
+    bgSecondary: '#1E293B',
+    accentLime: '#84CC16',
+    accentIndigo: '#6366F1',
+};
 
 // --- Helper Functions ---
 const generateRoomCode = () => {
     return Math.random().toString(36).substring(2, 8).toUpperCase();
 };
 
-// --- Animation Wrapper ---
-const AnimateIn = ({ children, from = 'opacity-0 -translate-y-4', to = 'opacity-100 translate-y-0', duration = 'duration-500' }) => {
+// --- Staggered Animation Wrapper ---
+const AnimateIn = ({ children, delay = 0, from = 'opacity-0 translate-y-4', to = 'opacity-100 translate-y-0', duration = 'duration-500' }) => {
     const [mounted, setMounted] = useState(false);
     useEffect(() => {
-        const timer = setTimeout(() => setMounted(true), 10); // Small delay to ensure transition triggers
+        const timer = setTimeout(() => setMounted(true), 10 + delay);
         return () => clearTimeout(timer);
-    }, []);
+    }, [delay]);
 
     return (
-        <div className={`transition-all ease-in-out ${duration} ${mounted ? to : from}`}>
+        <div className={`transition-all ease-out ${duration} ${mounted ? to : from}`}>
             {children}
+        </div>
+    );
+};
+
+// --- Floating Particles Background ---
+const FloatingParticles = () => {
+    const particles = [
+        { emoji: '❓', size: 'text-2xl', pos: 'top-[10%] left-[10%]', delay: '0s' },
+        { emoji: '💡', size: 'text-3xl', pos: 'top-[20%] right-[15%]', delay: '1s' },
+        { emoji: '🧠', size: 'text-2xl', pos: 'top-[60%] left-[8%]', delay: '2s' },
+        { emoji: '⚡', size: 'text-xl', pos: 'top-[70%] right-[10%]', delay: '0.5s' },
+        { emoji: '🎯', size: 'text-2xl', pos: 'top-[40%] right-[5%]', delay: '1.5s' },
+        { emoji: '✨', size: 'text-xl', pos: 'bottom-[20%] left-[15%]', delay: '2.5s' },
+    ];
+
+    return (
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            {particles.map((p, i) => (
+                <div
+                    key={i}
+                    className={`absolute ${p.pos} ${p.size} opacity-20 animate-float`}
+                    style={{ animationDelay: p.delay, animationDuration: `${4 + i * 0.5}s` }}
+                >
+                    {p.emoji}
+                </div>
+            ))}
+        </div>
+    );
+};
+
+// --- Countdown Overlay ---
+const CountdownOverlay = ({ count, onComplete }) => {
+    useEffect(() => {
+        if (count === 0) {
+            onComplete?.();
+        }
+    }, [count, onComplete]);
+
+    if (count === null) return null;
+
+    return (
+        <div className="countdown-overlay">
+            <div className="countdown-number" key={count}>
+                {count === 0 ? 'GO!' : count}
+            </div>
         </div>
     );
 };
@@ -30,499 +81,240 @@ const AnimateIn = ({ children, from = 'opacity-0 -translate-y-4', to = 'opacity-
 // --- React Components ---
 
 const PlayerCard = ({ player, isLeader, isSelf, score, rank }) => (
-    <div className={`p-4 rounded-xl flex items-center justify-between transition-all duration-300 ${isSelf ? 'bg-blue-100 dark:bg-blue-900 ring-2 ring-blue-500' : 'bg-gray-100 dark:bg-gray-700'}`}>
+    <div className={`p-4 rounded-xl flex items-center justify-between transition-all duration-300 hover:scale-[1.02] ${isSelf ? 'bg-indigo-500/20 ring-2 ring-indigo-500' : 'bg-white/5'}`}>
         <div className="flex items-center gap-4">
-            {rank && <span className="text-xl font-bold w-8 text-center text-gray-400 dark:text-gray-500">{rank}</span>}
-            <span className="text-3xl">{player?.avatar || '🧑‍🚀'}</span>
-            <span className="font-medium text-lg text-gray-800 dark:text-gray-200">{player?.name || 'Loading...'}</span>
+            {rank && <span className="text-xl font-bold w-8 text-center text-gray-500">{rank}</span>}
+            <span className="text-3xl">{player?.avatar || '😊'}</span>
+            <span className="font-medium text-lg text-white">{player?.name || 'Loading...'}</span>
         </div>
         <div className="flex items-center gap-4">
-            {score !== undefined && <span className="font-bold text-xl text-indigo-600 dark:text-indigo-400">{score} pts</span>}
+            {score !== undefined && <span className="font-bold text-xl text-lime-400">{score} pts</span>}
             {isLeader && <Crown className="w-6 h-6 text-yellow-500" />}
         </div>
     </div>
 );
 
-const HomeScreen = ({ setPlayerName, handleJoinRoom, handleCreateRoom, playerName }) => {
-    const [isJoining, setIsJoining] = useState(false);
-    const [joinCode, setJoinCode] = useState('');
-    const [currentFact, setCurrentFact] = useState(0);
-    const [showPricingModal, setShowPricingModal] = useState(false);
-    const [dailyChallenge] = useState({ topic: 'Ancient Civilizations', reward: '500 XP', timeLeft: '14:32:18' });
+const HomeScreen = ({ setPlayerName, handleJoinRoom, handleCreateRoom, playerName, pendingJoinCode, setPendingJoinCode }) => {
+    const [isJoining, setIsJoining] = useState(!!pendingJoinCode);
+    const [joinCode, setJoinCode] = useState(pendingJoinCode || '');
 
-    // Enhanced mock data
-    const trendingTopics = [
-        { icon: '🌍', topic: 'Geography', players: 1247, difficulty: 'Medium' },
-        { icon: '🧬', topic: 'Science', players: 892, difficulty: 'Hard' },
-        { icon: '📚', topic: 'Literature', players: 634, difficulty: 'Easy' },
-        { icon: '🎬', topic: 'Movies', players: 523, difficulty: 'Medium' }
-    ];
-
-    const leaderboard = [
-        { name: 'QuizMaster42', score: 15420, avatar: '👑', streak: 12 },
-        { name: 'BrainStorm', score: 14890, avatar: '🧠', streak: 8 },
-        { name: 'Genius_Kid', score: 13567, avatar: '⭐', streak: 15 },
-        { name: 'FactHunter', score: 12003, avatar: '🎯', streak: 5 }
-    ];
-
-    const funFacts = [
-        "🐙 Octopuses have three hearts and blue blood!",
-        "🌙 A day on Venus is longer than its year!",
-        "🦆 Ducks have three eyelids on each eye!",
-        "🍯 Honey never spoils - archaeologists found edible honey in ancient tombs!",
-        "🧠 Your brain uses 20% of your body's total energy!",
-        "🦋 Butterflies taste with their feet!",
-        "🌊 There are more possible games of chess than atoms in the observable universe!"
-    ];
-
-    const quickPlayTopics = [
-        { emoji: '🚀', topic: 'Space', color: 'from-blue-500 to-purple-600' },
-        { emoji: '🏛️', topic: 'History', color: 'from-amber-500 to-orange-600' },
-        { emoji: '🔬', topic: 'Science', color: 'from-green-500 to-teal-600' },
-        { emoji: '🎨', topic: 'Art', color: 'from-pink-500 to-rose-600' }
-    ];
-
-    const pricingPlans = [
-        {
-            name: 'Basic Premium',
-            price: '₹99',
-            duration: '/month',
-            features: [
-                'Detailed Analytics',
-                'Performance Trends',
-                'Category Breakdown',
-                'Ad-free Experience'
-            ],
-            popular: false
-        },
-        {
-            name: 'Pro Premium',
-            price: '₹199',
-            duration: '/month',
-            features: [
-                'All Basic Features',
-                'Advanced Analytics',
-                'Competitive Ranking',
-                'Custom Themes',
-                'Priority Support',
-                'Exclusive Challenges'
-            ],
-            popular: true
-        },
-        {
-            name: 'Annual Pro',
-            price: '₹1,999',
-            duration: '/year',
-            features: [
-                'All Pro Features',
-                '2 Months Free',
-                'Advanced AI Insights',
-                'Personal Coach',
-                'Unlimited Practice'
-            ],
-            popular: false
-        }
-    ];
-
-    // Rotate fun facts every 4 seconds
     useEffect(() => {
-        const interval = setInterval(() => {
-            setCurrentFact((prev) => (prev + 1) % funFacts.length);
-        }, 4000);
-        return () => clearInterval(interval);
-    }, [funFacts.length]);
-
-    const handleQuickPlay = (topic) => {
-        if (!playerName.trim()) {
-            setPlayerName(`Player_${Math.random().toString(36).substr(2, 6)}`);
+        if (pendingJoinCode) {
+            setIsJoining(true);
+            setJoinCode(pendingJoinCode);
         }
-        // Set the topic for quick play and create room
-        console.log(`Starting quick play with topic: ${topic}`);
-        handleCreateRoom();
-    };
+    }, [pendingJoinCode]);
 
-    const handleUpgradeClick = () => {
-        setShowPricingModal(true);
-    };
-
-    const handlePlanSelect = (plan) => {
-        console.log(`Selected plan: ${plan.name} for ${plan.price}`);
-        // Here you would integrate with your payment processor
-        alert(`Redirecting to payment for ${plan.name} - ${plan.price}${plan.duration}`);
-        setShowPricingModal(false);
-    };
+    const features = [
+        { icon: '🧠', title: 'AI-Powered', desc: 'Questions generated instantly' },
+        { icon: '⚡', title: 'Instant Play', desc: 'No signup needed' },
+        { icon: '🎯', title: 'Any Topic', desc: 'Unlimited possibilities' },
+        { icon: '🏆', title: 'Live Battles', desc: 'Compete in real-time' },
+    ];
 
     return (
-        <div className="min-h-screen w-full relative overflow-hidden">
-            {/* Enhanced Background texture and animations */}
-            <div className="absolute inset-0 bg-gradient-to-br from-indigo-50 via-white to-cyan-50 dark:from-gray-900 dark:via-gray-800 dark:to-blue-900/50"></div>
-            <div className="absolute inset-0 opacity-20">
-                <div className="absolute top-16 left-16 w-24 h-24 bg-purple-300 dark:bg-purple-700 rounded-full animate-pulse"></div>
-                <div className="absolute top-1/4 right-24 w-20 h-20 bg-blue-300 dark:bg-blue-700 rounded-full animate-bounce"></div>
-                <div className="absolute bottom-32 left-1/3 w-16 h-16 bg-green-300 dark:bg-green-700 rounded-full animate-ping"></div>
-                <div className="absolute top-2/3 right-1/4 w-12 h-12 bg-yellow-300 dark:bg-yellow-700 rounded-full animate-pulse"></div>
-                <div className="absolute top-1/2 left-1/6 w-14 h-14 bg-pink-300 dark:bg-pink-700 rounded-full animate-bounce"></div>
-                <div className="absolute bottom-1/4 right-1/3 w-10 h-10 bg-orange-300 dark:bg-orange-700 rounded-full animate-ping"></div>
+        <div className="min-h-screen w-full bg-[#0F172A] relative overflow-hidden">
+            {/* Grain texture */}
+            <div className="grain-overlay"></div>
+            
+            {/* Ambient Background */}
+            <div className="absolute inset-0">
+                {/* Gradient orbs - more subtle */}
+                <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-indigo-600/20 rounded-full blur-[150px]"></div>
+                <div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] bg-lime-500/10 rounded-full blur-[150px]"></div>
+                
+                {/* Subtle grid */}
+                <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:80px_80px]"></div>
             </div>
 
-            {/* Main responsive content */}
-            <div className="relative z-10 min-h-screen w-full p-2 sm:p-4 lg:p-6">
+            {/* Floating particles */}
+            <FloatingParticles />
+
+            {/* Main Content */}
+            <div className="relative z-10 min-h-screen flex flex-col">
                 
-                {/* Header - 3-column grid: Did You Know | Title | Premium Feature */}
-                <div className="mb-4 lg:mb-6">
-                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-center">
-                        {/* Did You Know - Left */}
-                        <div className="lg:col-span-3 flex justify-center lg:justify-start order-2 lg:order-1 mb-4 lg:mb-0">
-                            <AnimateIn from="opacity-0 -translate-x-12" to="opacity-100 translate-x-0" duration="duration-800">
-                                <div className="bg-gradient-to-r from-purple-500/25 to-blue-500/25 dark:from-purple-600/25 dark:to-blue-700/25 backdrop-blur-sm rounded-xl p-3 sm:p-4 border border-purple-300/60 dark:border-purple-600/60 w-full max-w-xs">
-                                    <h3 className="text-sm sm:text-base font-bold text-purple-700 dark:text-purple-300 mb-2">💡 Did You Know?</h3>
-                                    <AnimateIn key={currentFact} from="opacity-0 translate-y-2" to="opacity-100 translate-y-0" duration="duration-500">
-                                        <p className="text-purple-800 dark:text-purple-200 font-medium text-xs sm:text-sm">{funFacts[currentFact]}</p>
-                                    </AnimateIn>
-                                </div>
-                            </AnimateIn>
-                        </div>
+                {/* Navigation */}
+                <nav className="w-full px-6 lg:px-12 py-6">
+                    <div className="max-w-7xl mx-auto flex items-center justify-between">
+                        <AnimateIn from="opacity-0 -translate-x-8" to="opacity-100 translate-x-0">
+                            <div className="flex items-center gap-3">
+                                <img src="/Quizora.png" alt="Quizora" className="w-11 h-11 rounded-2xl shadow-lg shadow-indigo-500/30" />
+                                <span className="text-2xl font-bold text-white font-display tracking-tight">Quizora</span>
+                            </div>
+                        </AnimateIn>
+                        <AnimateIn from="opacity-0 translate-x-8" to="opacity-100 translate-x-0">
+                            <div className="hidden sm:flex items-center gap-3 px-4 py-2 rounded-full bg-white/5 border border-white/10">
+                                <div className="w-2.5 h-2.5 bg-lime-400 rounded-full animate-breathe"></div>
+                                <span className="text-sm text-gray-300 font-medium">2.4k online</span>
+                            </div>
+                        </AnimateIn>
+                    </div>
+                </nav>
 
-                        {/* Title - Center */}
-                        <div className="lg:col-span-6 flex flex-col items-center order-1 lg:order-2">
-                            <AnimateIn>
-                                <div className="flex flex-col items-center justify-center">
-                                    <div className="relative flex items-center justify-center">
-                                        <BrainCircuit className="w-12 h-12 sm:w-16 sm:h-16 lg:w-20 lg:h-20 text-indigo-500 animate-pulse" />
-                                        <div className="absolute -top-1 -right-1 sm:-top-2 sm:-right-2 w-4 h-4 sm:w-6 sm:h-6 bg-green-500 rounded-full animate-bounce flex items-center justify-center">
-                                            <span className="text-white text-xs font-bold">∞</span>
-                                        </div>
+                {/* Hero Section */}
+                <main className="flex-1 flex items-center justify-center px-6 lg:px-12 py-8">
+                    <div className="max-w-6xl mx-auto w-full">
+                        <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
+                            
+                            {/* Left - Hero Text */}
+                            <div className="text-center lg:text-left">
+                                <AnimateIn delay={100} from="opacity-0 translate-y-6" to="opacity-100 translate-y-0" duration="duration-700">
+                                    <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-lime-500/10 border border-lime-500/20 mb-6">
+                                        <Sparkles className="w-4 h-4 text-lime-400" />
+                                        <span className="text-lime-400 text-sm font-semibold">AI-Powered Quiz Platform</span>
                                     </div>
-                                    <h1 className="text-2xl sm:text-3xl lg:text-5xl font-bold text-gray-800 dark:text-white mt-2 lg:mt-3 bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent text-center">
-                                        AI Quiz Clash
+                                </AnimateIn>
+                                
+                                <AnimateIn delay={200} from="opacity-0 translate-y-6" to="opacity-100 translate-y-0" duration="duration-700">
+                                    <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-white leading-[1.1] mb-6 font-display">
+                                        Challenge Your
+                                        <span className="block mt-2 bg-gradient-to-r from-lime-400 via-emerald-400 to-cyan-400 bg-clip-text text-transparent">
+                                            Knowledge
+                                        </span>
                                     </h1>
-                                    <p className="text-gray-500 dark:text-gray-300 mt-1 lg:mt-2 text-sm sm:text-base lg:text-lg text-center">Where knowledge meets competition</p>
-                                </div>
-                            </AnimateIn>
-                        </div>
+                                </AnimateIn>
+                                
+                                <AnimateIn delay={300} from="opacity-0 translate-y-6" to="opacity-100 translate-y-0" duration="duration-700">
+                                    <p className="text-gray-400 text-lg mb-10 max-w-lg mx-auto lg:mx-0 leading-relaxed">
+                                        Create quiz rooms on any topic. AI generates unique questions instantly. 
+                                        Battle friends in real-time.
+                                    </p>
+                                </AnimateIn>
 
-                        {/* Premium Feature - Right */}
-                        <div className="lg:col-span-3 flex justify-center lg:justify-end order-3 mb-4 lg:mb-0">
-                            <AnimateIn from="opacity-0 translate-x-12" to="opacity-100 translate-x-0" duration="duration-800">
-                                <div className="relative bg-gradient-to-r from-gray-400/25 to-gray-600/25 dark:from-gray-600/25 dark:to-gray-800/25 backdrop-blur-sm rounded-xl p-3 sm:p-4 border border-gray-300/60 dark:border-gray-600/60 w-full max-w-xs">
-                                    {/* Lock overlay */}
-                                    <div className="absolute inset-0 bg-black/40 backdrop-blur-sm rounded-xl flex items-center justify-center">
-                                        <div className="text-center text-white">
-                                            <div className="text-xl sm:text-2xl mb-1">🔒</div>
-                                            <h3 className="text-xs sm:text-sm font-bold mb-1">Premium Feature</h3>
-                                            <p className="text-xs opacity-90 mb-2">Unlock analytics</p>
-                                            <button 
-                                                onClick={handleUpgradeClick}
-                                                className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white font-bold py-1 px-2 sm:py-1 sm:px-3 rounded-lg hover:from-yellow-600 hover:to-orange-600 transition-all duration-300 transform hover:scale-105 shadow-lg text-xs">
-                                                Upgrade Now
-                                            </button>
-                                        </div>
-                                    </div>
-                                    {/* Background content (blurred) */}
-                                    <h3 className="text-xs sm:text-sm font-bold text-gray-800 dark:text-white mb-2">📈 Analytics</h3>
-                                    <div className="space-y-2 opacity-50">
-                                        <div className="bg-white/50 dark:bg-gray-700/50 p-1 rounded">
-                                            <p className="text-xs font-semibold">Performance</p>
-                                            <div className="w-full h-1 bg-gray-200 rounded mt-1"></div>
-                                        </div>
-                                        <div className="bg-white/50 dark:bg-gray-700/50 p-1 rounded">
-                                            <p className="text-xs font-semibold">Categories</p>
-                                            <div className="grid grid-cols-3 gap-1 mt-1">
-                                                <div className="h-1 bg-blue-300 rounded"></div>
-                                                <div className="h-1 bg-green-300 rounded"></div>
-                                                <div className="h-1 bg-purple-300 rounded"></div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </AnimateIn>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Main content grid - responsive layout, full height for alignment */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-stretch min-h-[60vh] lg:min-h-[60vh]" style={{height: '60vh'}}>
-                    {/* Left Column - Trending & Stats */}
-                    <div className="lg:col-span-3 flex flex-col h-full gap-6">
-                        {/* Trending Topics */}
-                        <AnimateIn from="opacity-0 -translate-x-12 translate-y-8" to="opacity-100 translate-x-0 translate-y-0" duration="duration-900">
-                            <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-sm rounded-xl p-3 sm:p-4 shadow-xl border border-gray-200/50 dark:border-gray-700/50">
-                                <h3 className="text-sm sm:text-lg font-bold text-gray-800 dark:text-white mb-2 sm:mb-3 flex items-center gap-2">
-                                    🔥 Trending Now
-                                </h3>
-                                <div className="space-y-2">
-                                    {trendingTopics.slice(0, 3).map((topic, index) => (
-                                        <AnimateIn key={topic.topic} from="opacity-0 -translate-x-4" to="opacity-100 translate-x-0" duration="duration-300">
+                                {/* Features Grid */}
+                                <AnimateIn delay={400} from="opacity-0 translate-y-6" to="opacity-100 translate-y-0" duration="duration-700">
+                                    <div className="grid grid-cols-2 gap-3 max-w-lg mx-auto lg:mx-0">
+                                        {features.map((feature, i) => (
                                             <div 
-                                                style={{ transitionDelay: `${index * 150}ms` }} 
-                                                className="flex items-center justify-between p-2 bg-gray-50/90 dark:bg-gray-700/90 rounded-lg hover:bg-gray-100/90 dark:hover:bg-gray-600/90 transition-all duration-200 cursor-pointer transform hover:scale-105"
-                                                onClick={() => handleQuickPlay(topic.topic)}
+                                                key={feature.title}
+                                                className="flex items-start gap-3 p-4 rounded-2xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.06] hover:border-white/10 transition-all duration-300 cursor-default"
                                             >
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-lg">{topic.icon}</span>
-                                                    <div>
-                                                        <span className="font-semibold text-gray-800 dark:text-gray-200 block text-xs sm:text-sm">{topic.topic}</span>
-                                                        <span className="text-xs text-gray-500 dark:text-gray-400">{topic.difficulty} Level</span>
-                                                    </div>
+                                                <span className="text-2xl">{feature.icon}</span>
+                                                <div>
+                                                    <p className="text-white font-semibold text-sm">{feature.title}</p>
+                                                    <p className="text-gray-500 text-xs mt-0.5">{feature.desc}</p>
                                                 </div>
-                                                <span className="text-xs text-indigo-600 dark:text-indigo-400 font-bold">{topic.players}</span>
                                             </div>
-                                        </AnimateIn>
-                                    ))}
-                                </div>
+                                        ))}
+                                    </div>
+                                </AnimateIn>
                             </div>
-                        </AnimateIn>
-                        {/* Live Stats */}
-                        <AnimateIn from="opacity-0 -translate-x-12 translate-y-8" to="opacity-100 translate-x-0 translate-y-0" duration="duration-1000">
-                            <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-sm rounded-xl p-3 sm:p-4 shadow-xl border border-gray-200/50 dark:border-gray-700/50">
-                                <h3 className="text-sm sm:text-base font-bold text-gray-800 dark:text-white mb-2 sm:mb-3">📊 Live Stats</h3>
-                                <div className="grid grid-cols-3 gap-2">
-                                    <div className="text-center">
-                                        <p className="text-lg sm:text-2xl font-bold text-indigo-600 dark:text-indigo-400">4.2k</p>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Players Online</p>
-                                    </div>
-                                    <div className="text-center">
-                                        <p className="text-lg sm:text-2xl font-bold text-green-600 dark:text-green-400">127</p>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Active Rooms</p>
-                                    </div>
-                                    <div className="text-center">
-                                        <p className="text-lg sm:text-2xl font-bold text-purple-600 dark:text-purple-400">∞</p>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Questions</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </AnimateIn>
-                    </div>
 
-                    {/* Center Column - Main "Join the Battle" Section - Vertically centered */}
-                    <div className="lg:col-span-6 flex flex-col h-full">
-                        <div className="flex-1 flex flex-col justify-center items-center">
-                            <AnimateIn from="opacity-0 scale-90" to="opacity-100 scale-100">
-                                <div className="w-full max-w-xl bg-white/95 dark:bg-gray-800/95 backdrop-blur-lg rounded-2xl p-4 sm:p-6 lg:p-8 shadow-2xl border-2 border-indigo-200/60 dark:border-indigo-700/60">
-                                    <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-800 dark:text-white mb-4 lg:mb-6 text-center flex items-center justify-center gap-2 lg:gap-3">
-                                        <Users className="w-8 h-8 sm:w-10 sm:h-10 text-indigo-500" />
-                                        Join the Battle
-                                    </h2>
-                                    <div className="space-y-4 sm:space-y-5">
-                                        <input
-                                            type="text"
-                                            placeholder="Enter your warrior name"
-                                            value={playerName}
-                                            onChange={(e) => setPlayerName(e.target.value)}
-                                            className="w-full px-4 py-3 sm:px-6 sm:py-4 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-200 border-3 border-gray-200 dark:border-gray-600 focus:border-indigo-500 rounded-xl outline-none transition-all duration-300 text-center text-lg sm:text-xl font-medium"
-                                        />
-                                        {isJoining && (
-                                            <AnimateIn from="opacity-0 scale-95" to="opacity-100 scale-100" duration="duration-300">
+                            {/* Right - Action Card */}
+                            <AnimateIn delay={300} from="opacity-0 scale-95 translate-y-8" to="opacity-100 scale-100 translate-y-0" duration="duration-700">
+                                <div className="relative">
+                                    {/* Card glow effect */}
+                                    <div className="absolute -inset-4 bg-gradient-to-r from-indigo-500/20 via-violet-500/10 to-lime-500/20 rounded-[2rem] blur-2xl opacity-60"></div>
+                                    
+                                    {/* Glassmorphic Card */}
+                                    <div className="relative glass-card rounded-3xl p-8">
+                                        <div className="text-center mb-8">
+                                            <h2 className="text-2xl font-bold text-white mb-2 font-display">Start Playing</h2>
+                                            <p className="text-gray-400">Enter your name to begin</p>
+                                        </div>
+
+                                        <div className="space-y-4">
+                                            <div>
                                                 <input
                                                     type="text"
-                                                    placeholder="Enter battle code"
-                                                    maxLength="6"
-                                                    value={joinCode}
-                                                    onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                                                    className="w-full px-4 py-3 sm:px-6 sm:py-4 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-200 border-3 border-gray-200 dark:border-gray-600 focus:border-indigo-500 rounded-xl outline-none transition-all duration-300 text-center font-mono tracking-widest text-lg sm:text-xl"
+                                                    placeholder="Your display name"
+                                                    value={playerName}
+                                                    onChange={(e) => setPlayerName(e.target.value)}
+                                                    className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500/50 focus:bg-white/[0.08] transition-all duration-300 text-center text-lg font-medium"
                                                 />
-                                            </AnimateIn>
-                                        )}
-                                        <button 
-                                            onClick={isJoining ? () => handleJoinRoom(joinCode) : handleCreateRoom} 
-                                            disabled={!playerName || (isJoining && !joinCode.trim())}
-                                            className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold py-4 sm:py-5 px-4 sm:px-6 rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all duration-300 transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2 text-lg sm:text-xl shadow-2xl">
-                                            {isJoining ? <>Join Battle <ArrowRight className="w-5 h-5 sm:w-6 sm:h-6" /></> : 'Create Battle Room'}
-                                        </button>
-                                        <button onClick={() => setIsJoining(!isJoining)} className="text-center text-base sm:text-lg text-gray-500 dark:text-gray-400 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors duration-200 w-full font-medium">
-                                            {isJoining ? 'or create a new battle room' : 'Have a battle code? Join instead'}
-                                        </button>
-                                    </div>
-                                </div>
-                            </AnimateIn>
-                        </div>
-                        <div className="flex-1 flex flex-col justify-end w-full items-center">
-                            {/* Quick Play Modes */}
-                            <AnimateIn from="opacity-0 translate-y-8" to="opacity-100 translate-y-0" duration="duration-800">
-                        <div className="w-full max-w-2xl bg-white/85 dark:bg-gray-800/85 backdrop-blur-sm rounded-2xl p-3 sm:p-4 lg:p-6 shadow-xl border border-gray-200/50 dark:border-gray-700/50" style={{height: '75%'}}>
-                            <h3 className="text-lg sm:text-xl font-bold text-gray-800 dark:text-white mb-2 text-center flex items-center justify-center gap-2">
-                                ⚡ Quick Play Modes
-                            </h3>
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                                {quickPlayTopics.map((item, index) => (
-                                    <AnimateIn key={item.topic} from="opacity-0 scale-90" to="opacity-100 scale-100" duration="duration-300">
-                                        <button
-                                            onClick={() => handleQuickPlay(item.topic)}
-                                            disabled={!playerName}
-                                            style={{ transitionDelay: `${index * 100}ms` }}
-                                            className={`p-2 sm:p-3 rounded-xl bg-gradient-to-br ${item.color} text-white font-semibold transition-all duration-300 transform hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none shadow-lg`}
-                                        >
-                                            <div className="text-2xl sm:text-3xl mb-1">{item.emoji}</div>
-                                            <div className="text-xs sm:text-sm font-bold">{item.topic}</div>
-                                        </button>
-                                    </AnimateIn>
-                                ))}
-                            </div>
-                        </div>
-                            </AnimateIn>
-                        </div>
-                    </div>
+                                            </div>
 
-                    {/* Right Column - Daily Challenge, Hall of Fame - Start from top */}
-                    <div className="lg:col-span-3 flex flex-col h-full gap-6">
-                        {/* Daily Challenge */}
-                        <AnimateIn from="opacity-0 translate-x-12" to="opacity-100 translate-x-0" duration="duration-800">
-                            <div className="bg-gradient-to-br from-yellow-400/25 to-orange-500/25 dark:from-yellow-600/25 dark:to-orange-700/25 backdrop-blur-sm rounded-xl p-3 sm:p-4 shadow-xl border border-yellow-300/60 dark:border-yellow-600/60">
-                                <div className="flex items-center justify-between mb-2 sm:mb-3">
-                                    <h3 className="text-sm sm:text-lg font-bold text-gray-800 dark:text-white flex items-center gap-1 sm:gap-2">
-                                        🏆 Daily Challenge
-                                    </h3>
-                                    <span className="text-xs font-mono text-orange-600 dark:text-orange-400 bg-orange-100 dark:bg-orange-900/60 px-2 py-1 rounded-lg">
-                                        {dailyChallenge.timeLeft}
-                                    </span>
-                                </div>
-                                <div className="space-y-2 sm:space-y-3">
-                                    <p className="text-gray-700 dark:text-gray-300 text-xs sm:text-sm">
-                                        <span className="font-bold">Topic:</span> {dailyChallenge.topic}
-                                    </p>
-                                    <p className="text-gray-700 dark:text-gray-300 text-xs sm:text-sm">
-                                        <span className="font-bold">Reward:</span> {dailyChallenge.reward}
-                                    </p>
-                                    <button 
-                                        onClick={() => handleQuickPlay(dailyChallenge.topic)}
-                                        disabled={!playerName}
-                                        className="w-full bg-gradient-to-r from-yellow-500 to-orange-500 text-white font-bold py-2 sm:py-3 px-3 rounded-xl hover:from-yellow-600 hover:to-orange-600 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none shadow-lg text-xs sm:text-sm">
-                                        Accept Challenge
-                                    </button>
-                                </div>
-                            </div>
-                        </AnimateIn>
-                        {/* Hall of Fame */}
-                        <AnimateIn from="opacity-0 translate-x-12 translate-y-8" to="opacity-100 translate-x-0 translate-y-0" duration="duration-900">
-                            <div className="bg-white/85 dark:bg-gray-800/85 backdrop-blur-sm rounded-xl p-3 sm:p-4 shadow-xl border border-gray-200/50 dark:border-gray-700/50">
-                                <h3 className="text-sm sm:text-lg font-bold text-gray-800 dark:text-white mb-2 sm:mb-3 flex items-center gap-2">
-                                    👑 Hall of Fame
-                                </h3>
-                                <div className="space-y-2">
-                                    {leaderboard.slice(0, 3).map((player, index) => (
-                                        <AnimateIn key={player.name} from="opacity-0 translate-x-4" to="opacity-100 translate-x-0" duration="duration-300">
-                                            <div style={{ transitionDelay: `${index * 150}ms` }} className="flex items-center justify-between p-2 bg-gray-50/90 dark:bg-gray-700/90 rounded-lg">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="w-5 text-center font-bold text-sm">
-                                                        {index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉'}
-                                                    </span>
-                                                    <span className="text-lg">{player.avatar}</span>
-                                                    <div>
-                                                        <span className="font-semibold text-gray-800 dark:text-gray-200 block text-xs sm:text-sm">{player.name}</span>
-                                                        <span className="text-xs text-gray-500 dark:text-gray-400">🔥 {player.streak} streak</span>
-                                                    </div>
+                                            {isJoining && (
+                                                <AnimateIn from="opacity-0 -translate-y-2 scale-95" to="opacity-100 translate-y-0 scale-100" duration="duration-300">
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Room code"
+                                                        maxLength="6"
+                                                        value={joinCode}
+                                                        onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                                                        className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-white placeholder-gray-500 focus:outline-none focus:border-lime-500/50 focus:bg-white/[0.08] transition-all duration-300 text-center font-mono tracking-[0.4em] text-xl uppercase"
+                                                    />
+                                                </AnimateIn>
+                                            )}
+
+                                            <button
+                                                onClick={isJoining ? () => handleJoinRoom(joinCode) : handleCreateRoom}
+                                                disabled={!playerName || (isJoining && !joinCode.trim())}
+                                                className="btn-3d w-full py-4 px-6 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-bold rounded-2xl disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-3 text-lg"
+                                            >
+                                                {isJoining ? (
+                                                    <>Join Room <ArrowRight className="w-5 h-5" /></>
+                                                ) : (
+                                                    <>Create Room <ArrowRight className="w-5 h-5" /></>
+                                                )}
+                                            </button>
+
+                                            <div className="relative py-4">
+                                                <div className="absolute inset-0 flex items-center">
+                                                    <div className="w-full border-t border-white/10"></div>
                                                 </div>
-                                                <span className="font-bold text-indigo-600 dark:text-indigo-400 text-xs sm:text-sm">{player.score.toLocaleString()}</span>
+                                                <div className="relative flex justify-center">
+                                                    <span className="px-4 bg-[#1E293B] text-gray-500 text-sm rounded-full">or</span>
+                                                </div>
                                             </div>
-                                        </AnimateIn>
-                                    ))}
-                                </div>
-                            </div>
-                        </AnimateIn>
-                    </div>
-                </div>
 
-                {/* Bottom Features - 3-column grid for symmetry */}
-                <div className="mt-4 lg:mt-6 grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-end">
-                    <div className="lg:col-span-3"></div>
-                    <div className="lg:col-span-6 flex flex-col items-center">
-                        <AnimateIn from="opacity-0 translate-y-8" to="opacity-100 translate-y-0" duration="duration-1200">
-                            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
-                                <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl px-3 sm:px-4 py-2 shadow-lg border border-gray-200/50 dark:border-gray-700/50">
-                                    <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 text-center">
-                                        <span className="font-bold text-indigo-600 dark:text-indigo-400">Real-time</span> multiplayer experience
-                                    </p>
-                                </div>
-                                <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-xl px-3 sm:px-4 py-2 shadow-lg border border-gray-200/50 dark:border-gray-700/50">
-                                    <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 text-center">
-                                        <span className="font-bold text-purple-600 dark:text-purple-400">AI-powered</span> question generation
-                                    </p>
-                                </div>
-                            </div>
-                        </AnimateIn>
-                    </div>
-                    <div className="lg:col-span-3"></div>
-                </div>
-            </div>
+                                            <button
+                                                onClick={() => setIsJoining(!isJoining)}
+                                                className="w-full py-4 px-6 bg-white/5 border border-white/10 text-gray-300 font-medium rounded-2xl hover:bg-white/10 hover:border-white/20 transition-all duration-300"
+                                            >
+                                                {isJoining ? 'Create a new room instead' : 'Join with room code'}
+                                            </button>
+                                        </div>
 
-            {/* Pricing Modal */}
-            {showPricingModal && (
-                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <AnimateIn from="opacity-0 scale-90" to="opacity-100 scale-100" duration="duration-300">
-                        <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
-                            <div className="flex justify-between items-center mb-8">
-                                <h2 className="text-3xl font-bold text-gray-800 dark:text-white">Choose Your Premium Plan</h2>
-                                <button 
-                                    onClick={() => setShowPricingModal(false)}
-                                    className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl"
-                                >
-                                    ✕
-                                </button>
-                            </div>
-                            
-                            <div className="grid md:grid-cols-3 gap-6">
-                                {pricingPlans.map((plan) => (
-                                    <div key={plan.name} className={`relative rounded-2xl p-6 border-2 transition-all duration-300 hover:scale-105 ${
-                                        plan.popular 
-                                            ? 'border-yellow-500 bg-gradient-to-br from-yellow-50 to-orange-50 dark:from-yellow-900/20 dark:to-orange-900/20' 
-                                            : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700'
-                                    }`}>
-                                        {plan.popular && (
-                                            <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
-                                                <span className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white px-4 py-1 rounded-full text-sm font-bold">
-                                                    Most Popular
-                                                </span>
+                                        {/* Quick stats */}
+                                        <div className="mt-8 pt-6 border-t border-white/5 grid grid-cols-3 gap-4 text-center">
+                                            <div>
+                                                <p className="text-2xl font-bold text-white font-display">∞</p>
+                                                <p className="text-xs text-gray-500 mt-1">Topics</p>
                                             </div>
-                                        )}
-                                        
-                                        <div className="text-center mb-6">
-                                            <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2">{plan.name}</h3>
-                                            <div className="text-3xl font-bold text-indigo-600 dark:text-indigo-400">
-                                                {plan.price}<span className="text-lg text-gray-500">{plan.duration}</span>
+                                            <div>
+                                                <p className="text-2xl font-bold text-white font-display">10s</p>
+                                                <p className="text-xs text-gray-500 mt-1">Per Question</p>
+                                            </div>
+                                            <div>
+                                                <p className="text-2xl font-bold text-lime-400 font-display">2x</p>
+                                                <p className="text-xs text-gray-500 mt-1">Speed Bonus</p>
                                             </div>
                                         </div>
-                                        
-                                        <ul className="space-y-3 mb-6">
-                                            {plan.features.map((feature, featureIndex) => (
-                                                <li key={featureIndex} className="flex items-center gap-3">
-                                                    <span className="text-green-500">✓</span>
-                                                    <span className="text-gray-700 dark:text-gray-300">{feature}</span>
-                                                </li>
-                                            ))}
-                                        </ul>
-                                        
-                                        <button
-                                            onClick={() => handlePlanSelect(plan)}
-                                            className={`w-full py-3 px-4 rounded-xl font-bold transition-all duration-300 transform hover:scale-105 ${
-                                                plan.popular
-                                                    ? 'bg-gradient-to-r from-yellow-500 to-orange-500 text-white hover:from-yellow-600 hover:to-orange-600'
-                                                    : 'bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500'
-                                            }`}
-                                        >
-                                            {plan.popular ? 'Get Pro Now' : 'Select Plan'}
-                                        </button>
                                     </div>
-                                ))}
-                            </div>
-                            
-                            <div className="mt-8 text-center">
-                                <p className="text-gray-600 dark:text-gray-400 text-sm">
-                                    All plans include 7-day free trial • Cancel anytime • Secure payment with Razorpay
-                                </p>
-                            </div>
+                                </div>
+                            </AnimateIn>
                         </div>
-                    </AnimateIn>
-                </div>
-            )}
+                    </div>
+                </main>
+
+                {/* Footer */}
+                <footer className="px-6 lg:px-12 py-6">
+                    <div className="max-w-7xl mx-auto text-center text-sm text-gray-500">
+                        <AnimateIn delay={600} from="opacity-0" to="opacity-100" duration="duration-1000">
+                            <p>Powered by AI • Real-time multiplayer • No account needed</p>
+                        </AnimateIn>
+                    </div>
+                </footer>
+            </div>
         </div>
     );
-};
+};;
 
-const LobbyScreen = ({ roomData, userId, handleStartGame, isGenerating }) => {
+const LobbyScreen = ({ roomData, userId, handleStartGame, isGenerating, error }) => {
     const isLeader = roomData.leaderId === userId;
     const [topic, setTopic] = useState('');
     const [difficulty, setDifficulty] = useState('Medium');
     const [copied, setCopied] = useState(false);
+    const [showQR, setShowQR] = useState(false);
+    const [countdown, setCountdown] = useState(null);
+    
+    const MAX_PLAYERS = 4;
+    const playerCount = Object.keys(roomData.players).length;
+    const emptySlots = MAX_PLAYERS - playerCount;
+    
+    // Generate join URL for QR code
+    const joinUrl = `${window.location.origin}?join=${roomData.id}`;
 
     const handleCopy = () => {
         navigator.clipboard.writeText(roomData.id).then(() => {
@@ -533,71 +325,328 @@ const LobbyScreen = ({ roomData, userId, handleStartGame, isGenerating }) => {
         });
     };
 
+    const handleShareLink = () => {
+        if (navigator.share) {
+            navigator.share({
+                title: 'Join my Quizora game!',
+                text: `Join my quiz battle with code: ${roomData.id}`,
+                url: joinUrl
+            });
+        } else {
+            navigator.clipboard.writeText(joinUrl);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        }
+    };
+
+    // Avatars with colors for players
+    const playerAvatars = ['😎', '🚀', '🎮', '⚡'];
+    const avatarColors = [
+        'from-indigo-500 to-violet-500',
+        'from-emerald-500 to-cyan-500', 
+        'from-amber-500 to-orange-500',
+        'from-pink-500 to-rose-500'
+    ];
+
     return (
-        <AnimateIn>
-            <div className="w-full max-w-3xl mx-auto p-8 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl space-y-6">
-                <div className="text-center">
-                    <p className="text-gray-500 dark:text-gray-400">Room Code</p>
-                    <div className="mt-2 inline-flex items-center gap-3 bg-gray-100 dark:bg-gray-900 p-3 rounded-lg cursor-pointer" onClick={handleCopy}>
-                        <span className="font-mono text-3xl tracking-widest text-indigo-600 dark:text-indigo-400">{roomData.id}</span>
-                        <button className="text-gray-500 hover:text-indigo-500">
-                            {copied ? <Check className="text-green-500"/> : <Copy />}
-                        </button>
-                    </div>
-                </div>
+        <div className="min-h-screen w-full bg-[#0F172A] relative overflow-hidden">
+            {/* Grain texture */}
+            <div className="grain-overlay"></div>
+            
+            {/* Ambient Background */}
+            <div className="absolute inset-0">
+                <div className="absolute top-[-10%] left-[-5%] w-[500px] h-[500px] bg-indigo-600/20 rounded-full blur-[150px]"></div>
+                <div className="absolute bottom-[-10%] right-[-5%] w-[400px] h-[400px] bg-lime-500/10 rounded-full blur-[150px]"></div>
+                <div className="absolute top-1/2 right-1/4 w-[300px] h-[300px] bg-violet-500/10 rounded-full blur-[120px]"></div>
+                <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:80px_80px]"></div>
+            </div>
 
-                <div className="space-y-4">
-                    <h3 className="font-bold text-xl dark:text-white flex items-center gap-2"><Users className="w-6 h-6" /> Players ({Object.keys(roomData.players).length})</h3>
-                    <div className="space-y-3 max-h-60 overflow-y-auto p-1">
-                        {Object.entries(roomData.players).map(([id, player]) => (
-                            <AnimateIn key={id} from="opacity-0 -translate-x-4" to="opacity-100 translate-x-0">
-                                <PlayerCard player={player} isLeader={roomData.leaderId === id} isSelf={userId === id} />
-                            </AnimateIn>
-                        ))}
-                    </div>
-                </div>
+            {/* Countdown Overlay */}
+            <CountdownOverlay count={countdown} />
 
-                {isLeader && (
-                    <AnimateIn>
-                        <div className="space-y-6 pt-6 border-t border-gray-200 dark:border-gray-700">
-                            <div>
-                                <h3 className="font-bold text-xl dark:text-white mb-3">1. Choose a Topic</h3>
-                                <input
-                                    type="text"
-                                    placeholder="e.g., 'The Roman Empire' or 'Quantum Physics'"
-                                    value={topic}
-                                    onChange={(e) => setTopic(e.target.value)}
-                                    className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-200 border-2 border-gray-200 dark:border-gray-600 focus:border-indigo-500 rounded-lg outline-none transition-all duration-300 text-lg"
-                                    disabled={isGenerating}
-                                />
+            <div className="relative z-10 min-h-screen p-4 md:p-6 lg:p-8">
+                {/* Header */}
+                <AnimateIn from="opacity-0 -translate-y-4" to="opacity-100 translate-y-0">
+                    <div className="max-w-6xl mx-auto mb-8">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <img src="/Quizora.png" alt="Quizora" className="w-11 h-11 rounded-2xl shadow-lg shadow-indigo-500/30" />
+                                <span className="text-2xl font-bold text-white font-display tracking-tight">Quizora</span>
                             </div>
-                             <div>
-                                <h3 className="font-bold text-xl dark:text-white mb-3">2. Select Difficulty</h3>
-                                <div className="grid grid-cols-3 gap-2">
-                                    {['Easy', 'Medium', 'Hard'].map(level => (
-                                        <button key={level} onClick={() => setDifficulty(level)} className={`p-3 rounded-lg font-semibold transition-all duration-200 ${difficulty === level ? 'bg-indigo-600 text-white scale-105' : 'bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600'}`}>
-                                            {level}
-                                        </button>
-                                    ))}
+                            <div className="flex items-center gap-3 px-4 py-2 rounded-full bg-white/5 border border-white/10">
+                                <div className="w-2.5 h-2.5 bg-lime-400 rounded-full animate-breathe"></div>
+                                <span className="text-sm text-gray-300 font-medium">Game Lobby</span>
+                            </div>
+                        </div>
+                    </div>
+                </AnimateIn>
+
+                <div className="max-w-6xl mx-auto">
+                    {/* Main Grid Layout */}
+                    <div className="grid lg:grid-cols-3 gap-6">
+                        
+                        {/* Left Column - Room Code & QR */}
+                        <AnimateIn delay={100} from="opacity-0 translate-y-6" to="opacity-100 translate-y-0">
+                            <div className="lg:col-span-1 space-y-5">
+                                {/* Room Code Card */}
+                                <div className="glass-card rounded-2xl p-6">
+                                    <div className="text-center">
+                                        <p className="text-gray-400 text-sm font-medium mb-4">Room Code</p>
+                                        <div 
+                                            className="relative inline-flex items-center gap-3 bg-[#0F172A]/80 border border-white/10 px-6 py-4 rounded-2xl cursor-pointer hover:bg-white/5 transition-all duration-300 mb-4 group" 
+                                            onClick={handleCopy}
+                                        >
+                                            <span className="font-mono text-3xl md:text-4xl tracking-[0.3em] text-transparent bg-gradient-to-r from-lime-400 to-emerald-400 bg-clip-text font-bold">
+                                                {roomData.id}
+                                            </span>
+                                            <button className="text-gray-500 group-hover:text-white transition-colors">
+                                                {copied ? <Check className="w-5 h-5 text-lime-400"/> : <Copy className="w-5 h-5" />}
+                                            </button>
+                                            
+                                            {/* Copied tooltip */}
+                                            {copied && (
+                                                <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-lime-500 text-black text-xs font-bold rounded-lg">
+                                                    Copied!
+                                                </div>
+                                            )}
+                                        </div>
+                                        
+                                        {/* Action Buttons */}
+                                        <div className="flex gap-3 justify-center">
+                                            <button 
+                                                onClick={() => setShowQR(!showQR)}
+                                                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 ${
+                                                    showQR 
+                                                        ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' 
+                                                        : 'bg-white/5 border border-white/10 text-gray-400 hover:bg-white/10 hover:text-white'
+                                                }`}
+                                            >
+                                                <QrCode className="w-4 h-4" />
+                                                QR
+                                            </button>
+                                            <button 
+                                                onClick={handleShareLink}
+                                                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold bg-white/5 border border-white/10 text-gray-400 hover:bg-white/10 hover:text-white transition-all duration-300"
+                                            >
+                                                <Share2 className="w-4 h-4" />
+                                                Share
+                                            </button>
+                                        </div>
+                                    </div>
+                                    
+                                    {/* QR Code Section */}
+                                    {showQR && (
+                                        <AnimateIn from="opacity-0 scale-90" to="opacity-100 scale-100" duration="duration-300">
+                                            <div className="mt-6 pt-6 border-t border-white/10">
+                                                <div className="bg-white p-4 rounded-2xl mx-auto w-fit shadow-2xl">
+                                                    <QRCodeSVG 
+                                                        value={joinUrl} 
+                                                        size={180}
+                                                        level="H"
+                                                        includeMargin={false}
+                                                    />
+                                                </div>
+                                                <div className="mt-4 flex items-center justify-center gap-2 text-xs text-gray-500">
+                                                    <Smartphone className="w-4 h-4" />
+                                                    <span>Scan to join on mobile</span>
+                                                </div>
+                                            </div>
+                                        </AnimateIn>
+                                    )}
+                                </div>
+
+                                {/* Players Progress */}
+                                <div className="glass-card rounded-2xl p-5">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <span className="text-gray-400 text-sm font-medium">Players Joined</span>
+                                        <span className="text-white font-bold text-lg">{playerCount}<span className="text-gray-500 font-normal">/{MAX_PLAYERS}</span></span>
+                                    </div>
+                                    <div className="w-full bg-white/10 rounded-full h-3 overflow-hidden">
+                                        <div 
+                                            className="h-full bg-gradient-to-r from-lime-400 to-emerald-500 transition-all duration-700 ease-out rounded-full"
+                                            style={{ width: `${(playerCount / MAX_PLAYERS) * 100}%` }}
+                                        ></div>
+                                    </div>
+                                    {emptySlots > 0 && (
+                                        <p className="text-gray-500 text-xs mt-3 flex items-center gap-2">
+                                            <Loader className="w-3 h-3 animate-spin" />
+                                            Waiting for {emptySlots} more player{emptySlots > 1 ? 's' : ''}
+                                        </p>
+                                    )}
                                 </div>
                             </div>
-                            <button
-                                onClick={() => handleStartGame(topic, difficulty)}
-                                disabled={!topic || Object.keys(roomData.players).length < 1 || isGenerating}
-                                className="w-full bg-green-600 text-white font-bold py-4 px-4 rounded-lg hover:bg-green-700 transition-all duration-300 transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2 text-lg"
-                            >
-                                {isGenerating ? (<><Loader className="w-6 h-6 animate-spin" /> Generating Quiz...</>) : 'Start Game'}
-                            </button>
+                        </AnimateIn>
+
+                        {/* Center Column - Players Grid */}
+                        <AnimateIn delay={200} from="opacity-0 translate-y-6" to="opacity-100 translate-y-0">
+                            <div className="lg:col-span-1">
+                                <div className="glass-card rounded-2xl p-6 h-full">
+                                    <h3 className="font-bold text-lg text-white flex items-center gap-2 mb-6 font-display">
+                                        <Users className="w-5 h-5 text-indigo-400" /> 
+                                        Players
+                                    </h3>
+                                    
+                                    {/* 2x2 Player Grid */}
+                                    <div className="grid grid-cols-2 gap-4">
+                                        {/* Render existing players */}
+                                        {Object.entries(roomData.players).map(([id, player], index) => (
+                                            <AnimateIn key={id} delay={index * 100} from="opacity-0 scale-90" to="opacity-100 scale-100" duration="duration-400">
+                                                <div className={`relative p-4 rounded-2xl transition-all duration-300 hover:scale-[1.03] ${
+                                                    userId === id 
+                                                        ? 'bg-indigo-500/20 ring-2 ring-indigo-500/50' 
+                                                        : 'bg-white/5 hover:bg-white/[0.08]'
+                                                }`}>
+                                                    {/* Host Crown with Glow */}
+                                                    {roomData.leaderId === id && (
+                                                        <div className="absolute -top-2 -right-2 animate-glow">
+                                                            <div className="relative">
+                                                                <span className="text-xl">👑</span>
+                                                                <div className="absolute inset-0 bg-yellow-400/30 blur-xl rounded-full"></div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    
+                                                    <div className="text-center">
+                                                        {/* Avatar with animated ring */}
+                                                        <div className="relative w-16 h-16 mx-auto mb-3">
+                                                            <div className={`absolute inset-0 rounded-full bg-gradient-to-br ${avatarColors[index % 4]} animate-ring`}></div>
+                                                            <div className="absolute inset-1 rounded-full bg-[#0F172A] flex items-center justify-center">
+                                                                <span className="text-3xl">{player?.avatar || playerAvatars[index % 4]}</span>
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        <p className="font-semibold text-white text-sm truncate">{player?.name || '...'}</p>
+                                                        {userId === id && (
+                                                            <span className="inline-block mt-1 px-2 py-0.5 rounded-full bg-indigo-500/20 text-[10px] text-indigo-400 font-semibold">You</span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </AnimateIn>
+                                        ))}
+                                        
+                                        {/* Empty slots with pulse animation */}
+                                        {Array.from({ length: emptySlots }).map((_, index) => (
+                                            <div 
+                                                key={`empty-${index}`}
+                                                className="p-4 rounded-2xl border-2 border-dashed border-white/10 bg-white/[0.02] hover:border-white/20 transition-all duration-300"
+                                            >
+                                                <div className="text-center">
+                                                    <div className="w-16 h-16 mx-auto mb-3 rounded-full bg-white/5 flex items-center justify-center">
+                                                        <span className="text-3xl opacity-20">👤</span>
+                                                    </div>
+                                                    <p className="font-medium text-gray-600 text-sm">Waiting...</p>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        </AnimateIn>
+
+                        {/* Right Column - Game Settings */}
+                        <AnimateIn delay={300} from="opacity-0 translate-y-6" to="opacity-100 translate-y-0">
+                            <div className="lg:col-span-1">
+                                <div className="glass-card rounded-2xl p-6 h-full">
+                                    {error && (
+                                        <div className="mb-5 p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-center text-sm font-medium">
+                                            {error}
+                                        </div>
+                                    )}
+
+                                    {isLeader ? (
+                                        <div className="space-y-6">
+                                            <h3 className="font-bold text-lg text-white flex items-center gap-2 font-display">
+                                                <Sparkles className="w-5 h-5 text-lime-400 sparkle" />
+                                                Game Settings
+                                            </h3>
+
+                                            <div>
+                                                <label className="block text-sm font-semibold text-gray-400 mb-3">Quiz Topic</label>
+                                                <div className="relative">
+                                                    <input
+                                                        type="text"
+                                                        placeholder="e.g., Space Exploration, 90s Movies..."
+                                                        value={topic}
+                                                        onChange={(e) => setTopic(e.target.value)}
+                                                        className="w-full px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-white placeholder-gray-500 focus:outline-none focus:border-lime-500/50 focus:bg-white/[0.08] transition-all duration-300 pr-12"
+                                                        disabled={isGenerating}
+                                                    />
+                                                    <Sparkles className={`absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 transition-all duration-300 ${topic ? 'text-lime-400 sparkle' : 'text-gray-600'}`} />
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <label className="block text-sm font-semibold text-gray-400 mb-3">Difficulty</label>
+                                                <div className="segmented-control p-1">
+                                                    {['Easy', 'Medium', 'Hard'].map(level => (
+                                                        <button 
+                                                            key={level} 
+                                                            onClick={() => setDifficulty(level)} 
+                                                            disabled={isGenerating}
+                                                            className={`px-4 py-2.5 rounded-xl font-semibold text-sm transition-all duration-300 ${
+                                                                difficulty === level 
+                                                                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' 
+                                                                    : 'text-gray-400 hover:text-white'
+                                                            }`}
+                                                        >
+                                                            {level}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            <div className="pt-2">
+                                                <button
+                                                    onClick={() => handleStartGame(topic, difficulty)}
+                                                    disabled={!topic || playerCount < 1 || isGenerating}
+                                                    className={`btn-3d w-full py-4 px-6 bg-gradient-to-r from-lime-500 to-emerald-500 text-black font-bold rounded-2xl disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-3 text-lg ${topic && !isGenerating ? 'animate-glow' : ''}`}
+                                                >
+                                                    {isGenerating ? (
+                                                        <>
+                                                            <Loader className="w-5 h-5 animate-spin" /> 
+                                                            <span>AI Generating Quiz...</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <span>Start Game</span>
+                                                            <ArrowRight className="w-5 h-5" />
+                                                        </>
+                                                    )}
+                                                </button>
+                                                
+                                                {!topic && (
+                                                    <p className="text-gray-500 text-xs text-center mt-3">Enter a topic to enable start</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="h-full flex flex-col items-center justify-center text-center py-10">
+                                            <div className="relative mb-6">
+                                                <div className="w-20 h-20 rounded-full bg-indigo-500/20 flex items-center justify-center">
+                                                    <Loader className="w-10 h-10 animate-spin text-indigo-400" />
+                                                </div>
+                                                <div className="absolute inset-0 rounded-full bg-indigo-500/20 animate-ping"></div>
+                                            </div>
+                                            <h3 className="text-white font-bold text-lg mb-2 font-display">Waiting for Host</h3>
+                                            <p className="text-gray-500 text-sm max-w-[200px]">The host will choose a topic and start the game</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </AnimateIn>
+                    </div>
+
+                    {/* Bottom Tips */}
+                    <AnimateIn delay={500} from="opacity-0" to="opacity-100">
+                        <div className="mt-8 text-center">
+                            <p className="text-gray-600 text-sm">
+                                💡 <span className="text-gray-500">Share the QR code or room code for friends to join instantly</span>
+                            </p>
                         </div>
                     </AnimateIn>
-                )}
-                {!isLeader && (
-                     <div className="text-center p-4 bg-blue-50 dark:bg-blue-900/50 rounded-lg mt-6">
-                        <p className="font-medium text-blue-800 dark:text-blue-200">The room leader is choosing a topic to begin...</p>
-                    </div>
-                )}
+                </div>
             </div>
-        </AnimateIn>
+        </div>
     );
 };
 
@@ -611,7 +660,13 @@ const GameScreen = ({ roomData, userId, handleAnswer }) => {
     const [isRevealed, setIsRevealed] = useState(false);
     const intervalRef = useRef(null);
     const hasAnsweredRef = useRef(false);
-    const currentQuestionRef = useRef(currentQuestionIndex);
+    const currentQuestionRef = useRef(-1);
+    const handleAnswerRef = useRef(handleAnswer);
+
+    // Keep handleAnswer ref up to date
+    useEffect(() => {
+        handleAnswerRef.current = handleAnswer;
+    }, [handleAnswer]);
 
     useEffect(() => {
         setIsRevealed(allPlayersAnswered);
@@ -622,48 +677,55 @@ const GameScreen = ({ roomData, userId, handleAnswer }) => {
         hasAnsweredRef.current = !!playerAnswerData;
     }, [playerAnswerData]);
 
-    // Timer effect - only depends on question changes
+    // Timer effect - starts immediately when question changes or on mount
     useEffect(() => {
-        // Only reset if this is actually a new question
-        if (currentQuestionRef.current !== currentQuestionIndex) {
-            currentQuestionRef.current = currentQuestionIndex;
-            hasAnsweredRef.current = false;
-            setTimer(10);
-            setIsRevealed(false);
-            
-            // Clear any existing interval
-            if (intervalRef.current) {
-                clearInterval(intervalRef.current);
-                intervalRef.current = null;
-            }
-            
-            // Start new timer - runs independently for full 10 seconds
-            intervalRef.current = setInterval(() => {
-                setTimer(t => {
-                    if (t > 1) {
-                        return t - 1;
-                    } else {
-                        // Auto-submit if time runs out and player hasn't answered
-                        if (!hasAnsweredRef.current) {
-                            handleAnswer(null, 10);
-                        }
-                        // Keep timer at 0 but don't stop the interval
-                        return 0;
-                    }
-                });
-            }, 1000);
+        // Clear any existing interval first
+        if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
         }
 
+        // Check if this is a new question (or first mount)
+        const isNewQuestion = currentQuestionRef.current !== currentQuestionIndex;
+        
+        if (isNewQuestion) {
+            currentQuestionRef.current = currentQuestionIndex;
+            hasAnsweredRef.current = false; // Reset for new question
+            setTimer(10);
+            setIsRevealed(false);
+        }
+
+        // Start timer immediately
+        intervalRef.current = setInterval(() => {
+            setTimer(prevTimer => {
+                if (prevTimer > 1) {
+                    return prevTimer - 1;
+                } else {
+                    // Time's up - auto-submit if player hasn't answered
+                    if (!hasAnsweredRef.current) {
+                        hasAnsweredRef.current = true; // Prevent multiple submissions
+                        handleAnswerRef.current(null, 10);
+                    }
+                    clearInterval(intervalRef.current);
+                    intervalRef.current = null;
+                    return 0;
+                }
+            });
+        }, 1000);
+
+        // Cleanup on unmount or when question changes
         return () => {
             if (intervalRef.current) {
                 clearInterval(intervalRef.current);
                 intervalRef.current = null;
             }
         };
-    }, [currentQuestionIndex, handleAnswer]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentQuestionIndex]); // Only depend on question index
 
     const onAnswerClick = (optionIndex) => {
-        if (playerAnswerData) return;
+        if (playerAnswerData || hasAnsweredRef.current) return;
+        hasAnsweredRef.current = true; // Mark as answered immediately
         const timeTaken = Math.max(0, 10 - timer);
         handleAnswer(optionIndex, timeTaken);
     };
@@ -715,141 +777,452 @@ const GameScreen = ({ roomData, userId, handleAnswer }) => {
         return 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 opacity-60 border-2 border-gray-400 dark:border-gray-500';
     };
 
+    // Updated button class for dark theme
+    const getButtonClassDark = (index) => {
+        const playerChoice = playerAnswerData?.answerIndex;
+        
+        if (!isRevealed) {
+            if (playerChoice === index) {
+                return 'bg-violet-600 text-white border-2 border-violet-400 scale-105 shadow-lg shadow-violet-500/25';
+            }
+            return 'bg-white/5 text-white border border-white/10 hover:bg-white/10 hover:border-violet-500/50';
+        }
+        
+        const isCorrect = index === questionData.correctAnswerIndex;
+        
+        if (isCorrect) {
+            return 'bg-emerald-600 text-white border-2 border-emerald-400 scale-105 shadow-lg shadow-emerald-500/25';
+        }
+        
+        if (playerChoice === index && !isCorrect) {
+            return 'bg-red-600 text-white border-2 border-red-400 shadow-lg shadow-red-500/25';
+        }
+        
+        return 'bg-white/5 text-gray-500 border border-white/5 opacity-50';
+    };
+
     return (
-        <AnimateIn>
-            <div className="w-full max-w-4xl mx-auto p-8 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl space-y-8">
-                {/* Progress and Timer Bar */}
-                <div>
-                    <div className="flex justify-between items-center mb-2 text-sm font-medium text-gray-500 dark:text-gray-400">
-                        <span>Question {currentQuestionIndex + 1} / {roomData.questions.length}</span>
-                        <span>{roomData.topic} ({roomData.difficulty})</span>
-                    </div>
-                    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
-                        <div className="bg-indigo-600 h-2.5 rounded-full" style={{ width: `${((currentQuestionIndex + 1) / roomData.questions.length) * 100}%` }}></div>
-                    </div>
-                    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-4">
-                        <div className="bg-yellow-400 h-1.5 rounded-full transition-all duration-1000 linear" style={{ width: `${Math.max(0, (timer/10)*100)}%`}}></div>
-                    </div>
-                    
-                    {/* Dynamic Multiplier Display */}
-                    {!playerAnswerData && !isRevealed && (
-                        <div className="flex justify-center items-center mt-4">
-                            <div className={`px-4 py-2 rounded-full border-2 transition-all duration-300 ${getMultiplierColor()} border-current`}>
-                                <span className="text-lg font-bold">
-                                    {getCurrentMultiplier()}x Multiplier
+        <div className="min-h-screen w-full bg-[#0a0a0f] relative overflow-hidden">
+            {/* Ambient Background */}
+            <div className="absolute inset-0">
+                <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-violet-600/20 rounded-full blur-[120px]"></div>
+                <div className="absolute bottom-0 right-1/4 w-[400px] h-[400px] bg-cyan-500/15 rounded-full blur-[100px]"></div>
+                <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:60px_60px]"></div>
+            </div>
+
+            <div className="relative z-10 min-h-screen flex items-center justify-center p-4">
+                <AnimateIn>
+                    <div className="w-full max-w-4xl">
+                        {/* Header */}
+                        <div className="flex items-center justify-between mb-6">
+                            <div className="flex items-center gap-3">
+                                <img src="/Quizora.png" alt="Quizora" className="w-8 h-8 rounded-lg" />
+                                <span className="text-white font-semibold">Quizora</span>
+                            </div>
+                            <div className="flex items-center gap-4">
+                                <span className="text-gray-400 text-sm">{roomData.topic}</span>
+                                <span className="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs text-gray-400">
+                                    {roomData.difficulty}
                                 </span>
                             </div>
                         </div>
-                    )}
+
+                        {/* Main Card */}
+                        <div className="relative">
+                            <div className="absolute -inset-1 bg-gradient-to-r from-violet-600/20 via-cyan-500/20 to-violet-600/20 rounded-3xl blur-xl"></div>
+                            <div className="relative bg-[#12121a] border border-white/10 rounded-2xl p-8 space-y-6">
+                                {/* Progress Bar */}
+                                <div className="flex items-center gap-4">
+                                    <span className="text-sm text-gray-400 whitespace-nowrap">
+                                        {currentQuestionIndex + 1} / {roomData.questions.length}
+                                    </span>
+                                    <div className="flex-1 h-2 bg-white/5 rounded-full overflow-hidden">
+                                        <div 
+                                            className="h-full bg-gradient-to-r from-violet-500 to-cyan-500 rounded-full transition-all duration-500" 
+                                            style={{ width: `${((currentQuestionIndex + 1) / roomData.questions.length) * 100}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
+
+                                {/* Timer and Multiplier */}
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <div className={`w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold border-4 transition-all duration-300 ${
+                                            timer <= 3 ? 'border-red-500 text-red-500 animate-pulse' : 'border-cyan-500 text-cyan-400'
+                                        }`}>
+                                            {timer}
+                                        </div>
+                                        <div className="w-32 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                            <div 
+                                                className={`h-full rounded-full transition-all duration-1000 linear ${
+                                                    timer <= 3 ? 'bg-red-500' : 'bg-cyan-500'
+                                                }`} 
+                                                style={{ width: `${Math.max(0, (timer/10)*100)}%`}}
+                                            ></div>
+                                        </div>
+                                    </div>
+                                    
+                                    {!playerAnswerData && !isRevealed && (
+                                        <div className={`px-4 py-2 rounded-full border transition-all duration-300 ${
+                                            getCurrentMultiplier() === 2 ? 'border-emerald-500 text-emerald-400 bg-emerald-500/10' :
+                                            getCurrentMultiplier() === 1.5 ? 'border-yellow-500 text-yellow-400 bg-yellow-500/10' :
+                                            getCurrentMultiplier() === 1 ? 'border-orange-500 text-orange-400 bg-orange-500/10' :
+                                            'border-red-500 text-red-400 bg-red-500/10'
+                                        }`}>
+                                            <span className="text-lg font-bold">{getCurrentMultiplier()}x</span>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Live Scores */}
+                                <div className="flex flex-wrap gap-2 justify-center">
+                                    {Object.entries(roomData.players)
+                                        .filter(([, player]) => player && player.name)
+                                        .sort(([,a], [,b]) => (b.score || 0) - (a.score || 0))
+                                        .map(([id, player], index) => (
+                                            <div key={id} className={`px-4 py-2 rounded-xl flex items-center gap-2 transition-all duration-300 ${
+                                                userId === id 
+                                                    ? 'bg-violet-500/20 border border-violet-500/30' 
+                                                    : 'bg-white/5 border border-white/5'
+                                            }`}>
+                                                {index === 0 && <span>🥇</span>}
+                                                {index === 1 && <span>🥈</span>}
+                                                {index === 2 && <span>🥉</span>}
+                                                <span className="text-sm text-white">{player.avatar}</span>
+                                                <span className="text-sm text-gray-300 max-w-[80px] truncate">{player.name}</span>
+                                                <span className="text-sm font-bold text-cyan-400">{player.score || 0}</span>
+                                            </div>
+                                        ))
+                                    }
+                                </div>
+
+                                {/* Question */}
+                                <AnimateIn key={currentQuestionIndex} from="opacity-0 scale-95" to="opacity-100 scale-100" duration="duration-300">
+                                    <div className="text-center py-6">
+                                        <h2 className="text-2xl md:text-3xl font-semibold text-white leading-relaxed">
+                                            {questionData.question}
+                                        </h2>
+                                    </div>
+                                    
+                                    {/* Options */}
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {questionData.options.map((option, index) => (
+                                            <button
+                                                key={index}
+                                                onClick={() => onAnswerClick(index)}
+                                                disabled={!!playerAnswerData}
+                                                className={`p-5 rounded-xl text-left font-medium transition-all duration-300 disabled:cursor-not-allowed flex items-center justify-between text-lg ${getButtonClassDark(index)}`}
+                                            >
+                                                <span>{option}</span>
+                                                {isRevealed && (
+                                                    index === questionData.correctAnswerIndex 
+                                                        ? <Check className="w-6 h-6"/> 
+                                                        : (playerAnswerData?.answerIndex === index && <X className="w-6 h-6"/>)
+                                                )}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </AnimateIn>
+                                
+                                {/* Status */}
+                                <div className="h-6 text-center text-sm text-gray-500">
+                                    {playerAnswerData && !isRevealed && "Waiting for other players..."}
+                                    {isRevealed && "Next question coming up..."}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </AnimateIn>
+            </div>
+        </div>
+    );
+};
+
+const ScoreboardScreen = ({ roomData, userId, handlePlayAgain, handleExitToHome }) => {
+    const [showContent, setShowContent] = useState(false);
+    const [showPodium, setShowPodium] = useState(false);
+    const [showStandings, setShowStandings] = useState(false);
+    const [showActions, setShowActions] = useState(false);
+    
+    const sortedPlayers = useMemo(() => {
+        return Object.entries(roomData.players)
+            .filter(([, player]) => player && player.name)
+            .sort(([, a], [, b]) => (b.score || 0) - (a.score || 0));
+    }, [roomData.players]);
+
+    const isLeader = roomData.leaderId === userId;
+    
+    // Get top 3 for podium
+    const first = sortedPlayers[0];
+    const second = sortedPlayers[1];
+    const third = sortedPlayers[2];
+    const restPlayers = sortedPlayers.slice(3);
+
+    // Trigger confetti and staggered animations
+    useEffect(() => {
+        // Fire confetti
+        const duration = 3000;
+        const end = Date.now() + duration;
+
+        const fireConfetti = () => {
+            confetti({
+                particleCount: 3,
+                angle: 60,
+                spread: 55,
+                origin: { x: 0, y: 0.7 },
+                colors: ['#ffd700', '#ffb700', '#ff9500', '#84CC16', '#22d3ee']
+            });
+            confetti({
+                particleCount: 3,
+                angle: 120,
+                spread: 55,
+                origin: { x: 1, y: 0.7 },
+                colors: ['#ffd700', '#ffb700', '#ff9500', '#84CC16', '#22d3ee']
+            });
+
+            if (Date.now() < end) {
+                requestAnimationFrame(fireConfetti);
+            }
+        };
+
+        // Big burst at start
+        confetti({
+            particleCount: 100,
+            spread: 100,
+            origin: { y: 0.6 },
+            colors: ['#ffd700', '#ffb700', '#ff9500', '#84CC16', '#22d3ee', '#a855f7']
+        });
+
+        fireConfetti();
+
+        // Staggered content reveal
+        setTimeout(() => setShowContent(true), 300);
+        setTimeout(() => setShowPodium(true), 800);
+        setTimeout(() => setShowStandings(true), 1400);
+        setTimeout(() => setShowActions(true), 1800);
+    }, []);
+
+    // Find current user's position
+    const userPosition = sortedPlayers.findIndex(([id]) => id === userId) + 1;
+    const userPlayer = roomData.players[userId];
+
+    return (
+        <div className="min-h-screen w-full bg-[#0F172A] relative overflow-hidden">
+            {/* Animated Background */}
+            <div className="absolute inset-0">
+                {/* God rays effect for winner */}
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[600px]">
+                    <div className="absolute inset-0 bg-gradient-to-b from-yellow-500/20 via-amber-500/10 to-transparent blur-3xl animate-pulse"></div>
+                    <div className="absolute inset-0 bg-[conic-gradient(from_0deg,transparent,rgba(251,191,36,0.1),transparent,rgba(251,191,36,0.1),transparent)] animate-spin" style={{ animationDuration: '20s' }}></div>
+                </div>
+                
+                {/* Ambient orbs */}
+                <div className="absolute top-1/4 left-10 w-[300px] h-[300px] bg-violet-600/20 rounded-full blur-[100px] animate-pulse"></div>
+                <div className="absolute bottom-1/4 right-10 w-[250px] h-[250px] bg-cyan-500/15 rounded-full blur-[80px] animate-pulse" style={{ animationDelay: '1s' }}></div>
+                
+                {/* Grain texture */}
+                <div className="absolute inset-0 opacity-[0.015]" style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 256 256\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'noise\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.9\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23noise)\'/%3E%3C/svg%3E")' }}></div>
+            </div>
+
+            <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-4 md:p-6">
+                {/* Game Over Title */}
+                <div className={`text-center mb-8 transition-all duration-1000 ${showContent ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-8'}`}>
+                    <h1 className="text-5xl md:text-7xl font-black mb-3 tracking-tight">
+                        <span className="text-transparent bg-gradient-to-r from-yellow-300 via-amber-400 to-yellow-500 bg-clip-text">
+                            GAME OVER
+                        </span>
+                    </h1>
                     
-                    {/* Timer Display */}
-                    <div className="text-center mt-2">
-                        <span className="text-2xl font-bold text-gray-700 dark:text-gray-300">
-                            {timer}s
+                    {/* Topic Badge */}
+                    <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 backdrop-blur-sm">
+                        <span className="text-gray-400 text-sm">
+                            {roomData.topic}
+                        </span>
+                        <span className="w-1 h-1 bg-gray-600 rounded-full"></span>
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                            roomData.difficulty === 'Easy' ? 'bg-emerald-500/20 text-emerald-400' :
+                            roomData.difficulty === 'Medium' ? 'bg-yellow-500/20 text-yellow-400' :
+                            'bg-red-500/20 text-red-400'
+                        }`}>
+                            {roomData.difficulty}
                         </span>
                     </div>
                 </div>
 
-                {/* Live Scores */}
-                <div className="bg-gray-50 dark:bg-gray-700 rounded-xl p-4">
-                    <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-3 text-center">Live Scores</h3>
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                        {Object.entries(roomData.players)
-                            .filter(([, player]) => player && player.name) // Filter out invalid players
-                            .sort(([,a], [,b]) => (b.score || 0) - (a.score || 0)) // Safe sorting with fallback to 0
-                            .map(([id, player]) => (
-                                <div key={id} className={`p-3 rounded-lg text-center transition-all duration-300 ${
-                                    userId === id 
-                                        ? 'bg-blue-100 dark:bg-blue-900 border-2 border-blue-500' 
-                                        : 'bg-white dark:bg-gray-600'
-                                }`}>
-                                    <div className="text-lg mb-1">{player.avatar || '🧑‍🚀'}</div>
-                                    <div className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
-                                        {player.name || 'Unknown Player'}
+                {/* Podium Section */}
+                <div className={`w-full max-w-2xl mb-8 transition-all duration-1000 delay-300 ${showPodium ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}>
+                    <div className="flex items-end justify-center gap-3 md:gap-6">
+                        
+                        {/* 2nd Place */}
+                        {second && (
+                            <div className="flex flex-col items-center">
+                                <div className="relative mb-3">
+                                    {/* Avatar ring */}
+                                    <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-gradient-to-br from-gray-400 to-gray-500 p-[3px]">
+                                        <div className="w-full h-full rounded-full bg-[#1E293B] flex items-center justify-center">
+                                            <span className="text-3xl md:text-4xl">😊</span>
+                                        </div>
                                     </div>
-                                    <div className="text-lg font-bold text-indigo-600 dark:text-indigo-400">
-                                        {player.score || 0}
-                                    </div>
+                                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 text-xl">🥈</div>
                                 </div>
-                            ))
-                        }
-                    </div>
-                </div>
-
-                <AnimateIn key={currentQuestionIndex} from="opacity-0 scale-95" to="opacity-100 scale-100" duration="duration-300">
-                    <div className="text-center">
-                        <h2 className="text-2xl md:text-3xl font-semibold text-gray-800 dark:text-white">{questionData.question}</h2>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-8">
-                        {questionData.options.map((option, index) => (
-                            <button
-                                key={index}
-                                onClick={() => onAnswerClick(index)}
-                                disabled={!!playerAnswerData}
-                                className={`p-5 rounded-xl text-left font-medium transition-all duration-300 disabled:cursor-not-allowed flex items-center justify-between text-lg ${getButtonClass(index)}`}
-                            >
-                               <span>{option}</span>
-                               {isRevealed && (index === questionData.correctAnswerIndex ? <Check/> : (playerAnswerData?.answerIndex === index && <X/>))}
-                            </button>
-                        ))}
-                    </div>
-                </AnimateIn>
-                
-                <div className="h-6 pt-4 text-center text-sm text-gray-500 dark:text-gray-400">
-                    {playerAnswerData && !isRevealed && "Waiting for other players..."}
-                    {isRevealed && "Next question coming up..."}
-                </div>
-            </div>
-        </AnimateIn>
-    );
-};
-
-const ScoreboardScreen = ({ roomData, userId, handlePlayAgain }) => {
-    const sortedPlayers = useMemo(() => {
-        return Object.entries(roomData.players)
-            .filter(([, player]) => player && player.name) // Filter out invalid players
-            .sort(([, a], [, b]) => (b.score || 0) - (a.score || 0)); // Safe sorting with fallback
-    }, [roomData.players]);
-
-    const isLeader = roomData.leaderId === userId;
-
-    return (
-        <AnimateIn>
-            <div className="w-full max-w-2xl mx-auto p-8 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl space-y-6">
-                <div className="text-center">
-                    <PartyPopper className="w-20 h-20 mx-auto text-yellow-500" />
-                    <h2 className="text-4xl font-bold text-gray-800 dark:text-white mt-4">Final Scores</h2>
-                    <p className="text-gray-500 dark:text-gray-300 mt-2">Well played, everyone!</p>
-                </div>
-
-                <div className="space-y-4 pt-4">
-                    {sortedPlayers.map(([id, player], index) => (
-                        <AnimateIn key={id} from="opacity-0 -translate-x-4" to="opacity-100 translate-x-0" duration="duration-500">
-                            <div style={{ transitionDelay: `${index * 100}ms` }}>
-                                <PlayerCard player={player} isLeader={roomData.leaderId === id} isSelf={userId === id} score={player.score} rank={index === 0 ? '🏆' : index + 1} />
+                                <p className="text-white font-semibold text-sm md:text-base truncate max-w-[80px] md:max-w-[100px]">{second[1].name}</p>
+                                <p className="text-gray-400 text-lg md:text-xl font-bold">{second[1].score}</p>
+                                
+                                {/* Podium base */}
+                                <div className="w-20 md:w-28 h-16 md:h-20 mt-3 rounded-t-lg bg-gradient-to-b from-gray-500/30 to-gray-600/20 border border-gray-500/30 flex items-center justify-center">
+                                    <span className="text-3xl md:text-4xl font-black text-gray-500/50">2</span>
+                                </div>
                             </div>
-                        </AnimateIn>
-                    ))}
+                        )}
+                        
+                        {/* 1st Place - Winner */}
+                        {first && (
+                            <div className="flex flex-col items-center -mt-6">
+                                <div className="relative mb-3">
+                                    {/* Glow effect */}
+                                    <div className="absolute -inset-3 bg-yellow-500/30 rounded-full blur-xl animate-pulse"></div>
+                                    
+                                    {/* Crown */}
+                                    <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-3xl animate-bounce" style={{ animationDuration: '2s' }}>👑</div>
+                                    
+                                    {/* Avatar ring */}
+                                    <div className="relative w-20 h-20 md:w-28 md:h-28 rounded-full bg-gradient-to-br from-yellow-400 via-amber-500 to-yellow-600 p-[4px]">
+                                        <div className="w-full h-full rounded-full bg-[#1E293B] flex items-center justify-center">
+                                            <span className="text-4xl md:text-5xl">🏆</span>
+                                        </div>
+                                    </div>
+                                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 text-2xl">🥇</div>
+                                </div>
+                                
+                                <p className="text-white font-bold text-base md:text-lg truncate max-w-[100px] md:max-w-[120px]">{first[1].name}</p>
+                                <p className="text-3xl md:text-4xl font-black text-transparent bg-gradient-to-r from-cyan-400 to-emerald-400 bg-clip-text">
+                                    {first[1].score}
+                                </p>
+                                <span className="text-xs text-gray-500 mt-1">points</span>
+                                
+                                {/* Podium base */}
+                                <div className="w-24 md:w-32 h-24 md:h-28 mt-3 rounded-t-lg bg-gradient-to-b from-yellow-500/30 to-amber-600/20 border border-yellow-500/30 flex items-center justify-center relative overflow-hidden">
+                                    <div className="absolute inset-0 bg-[linear-gradient(45deg,transparent_25%,rgba(255,255,255,0.1)_50%,transparent_75%)] animate-shimmer"></div>
+                                    <span className="text-4xl md:text-5xl font-black text-yellow-500/50">1</span>
+                                </div>
+                            </div>
+                        )}
+                        
+                        {/* 3rd Place */}
+                        {third && (
+                            <div className="flex flex-col items-center">
+                                <div className="relative mb-3">
+                                    {/* Avatar ring */}
+                                    <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-gradient-to-br from-amber-600 to-amber-700 p-[3px]">
+                                        <div className="w-full h-full rounded-full bg-[#1E293B] flex items-center justify-center">
+                                            <span className="text-3xl md:text-4xl">😊</span>
+                                        </div>
+                                    </div>
+                                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 text-xl">🥉</div>
+                                </div>
+                                <p className="text-white font-semibold text-sm md:text-base truncate max-w-[80px] md:max-w-[100px]">{third[1].name}</p>
+                                <p className="text-gray-400 text-lg md:text-xl font-bold">{third[1].score}</p>
+                                
+                                {/* Podium base */}
+                                <div className="w-20 md:w-28 h-12 md:h-14 mt-3 rounded-t-lg bg-gradient-to-b from-amber-700/30 to-amber-800/20 border border-amber-600/30 flex items-center justify-center">
+                                    <span className="text-3xl md:text-4xl font-black text-amber-700/50">3</span>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
 
-                {isLeader && (
-                    <div className="text-center pt-6">
-                        <button
-                            onClick={handlePlayAgain}
-                            className="bg-indigo-600 text-white font-bold py-3 px-8 rounded-lg hover:bg-indigo-700 transition-all duration-300 transform hover:scale-105 text-lg"
-                        >
-                            Play Again
-                        </button>
+                {/* Your Result (if not in top 3) */}
+                {userPosition > 3 && userPlayer && (
+                    <div className={`w-full max-w-md mb-6 transition-all duration-700 ${showStandings ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
+                        <div className="bg-violet-500/10 backdrop-blur-md border border-violet-500/30 rounded-2xl p-4 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <span className="text-2xl font-bold text-violet-400">#{userPosition}</span>
+                                <div className="w-10 h-10 rounded-full bg-violet-500/20 flex items-center justify-center">
+                                    <span className="text-xl">😊</span>
+                                </div>
+                                <div>
+                                    <p className="text-white font-medium">{userPlayer.name}</p>
+                                    <p className="text-xs text-violet-400">Your position</p>
+                                </div>
+                            </div>
+                            <p className="text-2xl font-bold text-cyan-400">{userPlayer.score}</p>
+                        </div>
                     </div>
                 )}
-                 {!isLeader && (
-                     <div className="text-center p-4 bg-blue-50 dark:bg-blue-900/50 rounded-lg mt-6">
-                        <p className="font-medium text-blue-800 dark:text-blue-200">Waiting for the leader to start a new game.</p>
+
+                {/* Rest of Standings (4th place onwards) */}
+                {restPlayers.length > 0 && (
+                    <div className={`w-full max-w-md mb-8 transition-all duration-700 delay-200 ${showStandings ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
+                        <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-4">
+                            <h3 className="text-sm font-medium text-gray-500 mb-3">Other Players</h3>
+                            <div className="space-y-2">
+                                {restPlayers.map(([id, player], index) => (
+                                    <div 
+                                        key={id}
+                                        className={`flex items-center justify-between p-3 rounded-xl transition-all ${
+                                            userId === id ? 'bg-violet-500/20 border border-violet-500/30' : 'bg-white/5'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <span className="text-sm font-bold text-gray-500 w-6">#{index + 4}</span>
+                                            <span className="text-lg">😊</span>
+                                            <span className="text-white text-sm">{player.name}</span>
+                                            {userId === id && <span className="text-[10px] text-violet-400">(You)</span>}
+                                        </div>
+                                        <span className="text-sm font-bold text-gray-400">{player.score}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
                     </div>
                 )}
+
+                {/* Action Buttons */}
+                <div className={`w-full max-w-md transition-all duration-700 delay-300 ${showActions ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
+                    {isLeader ? (
+                        <div className="flex flex-col sm:flex-row gap-3">
+                            <button
+                                onClick={handlePlayAgain}
+                                className="flex-1 group relative py-4 px-6 bg-gradient-to-r from-violet-600 to-cyan-600 text-white font-bold rounded-xl overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:shadow-lg hover:shadow-violet-500/25"
+                            >
+                                {/* Pulse animation */}
+                                <div className="absolute inset-0 bg-gradient-to-r from-violet-400 to-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                                <div className="absolute inset-0 animate-pulse bg-white/10"></div>
+                                <span className="relative flex items-center justify-center gap-2">
+                                    <RotateCcw className="w-5 h-5" />
+                                    Play Again
+                                </span>
+                            </button>
+                            <button
+                                onClick={handleExitToHome}
+                                className="flex-1 py-4 px-6 bg-transparent border-2 border-white/20 text-gray-300 font-semibold rounded-xl hover:bg-white/5 hover:border-white/30 transition-all duration-300 flex items-center justify-center gap-2"
+                            >
+                                <Home className="w-5 h-5" />
+                                Exit Lobby
+                            </button>
+                        </div>
+                    ) : (
+                        <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 text-center">
+                            <Loader className="w-8 h-8 animate-spin text-violet-400 mx-auto mb-3" />
+                            <p className="text-white font-medium mb-1">Waiting for host</p>
+                            <p className="text-gray-500 text-sm">The room leader will start the next game</p>
+                        </div>
+                    )}
+                </div>
             </div>
-        </AnimateIn>
+
+            {/* CSS for shimmer animation */}
+            <style>{`
+                @keyframes shimmer {
+                    0% { transform: translateX(-100%); }
+                    100% { transform: translateX(100%); }
+                }
+                .animate-shimmer {
+                    animation: shimmer 2s infinite;
+                }
+            `}</style>
+        </div>
     );
 };
 
@@ -862,220 +1235,165 @@ export default function App() {
     const [roomData, setRoomData] = useState(null);
     const [error, setError] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
-    const [isAuthReady, setIsAuthReady] = useState(false);
+    const [isConnected, setIsConnected] = useState(false);
+    const [pendingJoinCode, setPendingJoinCode] = useState(null);
 
+    // Check for join code in URL on mount
     useEffect(() => {
-        signInAnonymously(auth).catch(err => {
-            console.error("Anonymous sign-in failed:", err);
-            setError("Could not connect to the game service.");
-        });
-
-        const unsubscribe = onAuthStateChanged(auth, (user) => {
-            if (user) setUserId(user.uid); 
-            else setUserId(null);
-            setIsAuthReady(true);
-        });
-        return () => unsubscribe();
+        const params = new URLSearchParams(window.location.search);
+        const joinCode = params.get('join');
+        if (joinCode) {
+            setPendingJoinCode(joinCode.toUpperCase());
+            // Clean up URL without reload
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
     }, []);
 
+    // Connect to Socket.io server
     useEffect(() => {
-        if (!roomCode || !isAuthReady) return;
+        const socket = socketService.connect();
 
-        const roomRef = doc(db, 'quizRooms', roomCode);
-        const unsubscribe = onSnapshot(roomRef, (docSnap) => {
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                setRoomData({ ...data, id: docSnap.id });
-                const isLeader = data.leaderId === userId;
-                const allPlayersAnswered = data.gameState === 'in-game' && Object.values(data.players).every(p => p.answers?.[data.currentQuestion]);
-                if (isLeader && allPlayersAnswered) {
-                    setTimeout(() => advanceGame(docSnap.ref, data), 2500);
-                }
-            } else {
-                setError('Room not found.');
-                setRoomData(null);
-                setRoomCode('');
-            }
-        }, (err) => {
-            console.error("Snapshot listener error:", err);
-            setError("Lost connection to the room.");
+        socket.on('connect', () => {
+            setUserId(socket.id);
+            setIsConnected(true);
+            setError('');
         });
 
-        return () => unsubscribe();
-    }, [roomCode, isAuthReady, userId]);
-
-    const handleCreateRoom = async () => {
-        if (!playerName.trim() || !userId) return setError('Please enter your name.');
-        setError('');
-        const newRoomCode = generateRoomCode();
-        const roomRef = doc(db, 'quizRooms', newRoomCode);
-        await setDoc(roomRef, {
-            leaderId: userId, 
-            gameState: 'lobby', 
-            players: { [userId]: { name: playerName, avatar: '👑', score: 0, answers: {} }},
-            createdAt: serverTimestamp(),
+        socket.on('disconnect', () => {
+            setIsConnected(false);
         });
-        setRoomCode(newRoomCode);
-    };
 
-    const handleJoinRoom = async (codeToJoin) => {
-        if (!playerName.trim() || !codeToJoin.trim() || !userId) return setError('Please enter your name and a room code.');
-        setError('');
-        
-        try {
-            const roomRef = doc(db, 'quizRooms', codeToJoin);
-            
-            await runTransaction(db, async (transaction) => {
-                const roomDoc = await transaction.get(roomRef);
-                
-                if (!roomDoc.exists()) {
-                    throw new Error('Room does not exist.');
-                }
-                
-                const roomData = roomDoc.data();
-                
-                // Check if game has already started
-                if (roomData.gameState !== 'lobby') {
-                    throw new Error('Game has already started. Cannot join now.');
-                }
-                
-                // Add the new player to the players object
-                const updatedPlayers = {
-                    ...roomData.players,
-                    [userId]: {
-                        name: playerName,
-                        avatar: '🧑‍🚀',
-                        score: 0,
-                        answers: {}
-                    }
-                };
-                
-                transaction.update(roomRef, { players: updatedPlayers });
-            });
-            
-            // Set the room code only after successful join
-            setRoomCode(codeToJoin);
-            console.log('Successfully joined room');
-        } catch (err) {
-            console.error('Error joining room:', err);
-            if (err.message === 'Room does not exist.') {
-                setError('Room does not exist.');
-            } else if (err.message === 'Game has already started. Cannot join now.') {
-                setError('Game has already started. Cannot join now.');
-            } else {
-                setError('Failed to join room. Please try again.');
-            }
-        }
-    };
-    
-    const handleStartGame = async (topic, difficulty) => {
-        if (!topic) return;
-        setIsGenerating(true);
-        const prompt = `Generate exactly 7 multiple-choice quiz questions about "${topic}" with a difficulty level of "${difficulty}". Provide the output in a valid JSON array format. Each object in the array must have these exact keys: "question" (string), "options" (array of 4 strings), and "correctAnswerIndex" (integer from 0 to 3). Do not include any text outside of the JSON array.`;
+        socket.on('connect_error', () => {
+            setError('Could not connect to game server. Make sure the server is running.');
+            setIsConnected(false);
+        });
 
-        try {
-            const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
-            const apiKey = "AIzaSyAe5A_txJP5tELZWQytMGVJ4N0QEvVxf_s";
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-            const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-            if (!response.ok) throw new Error(`API request failed with status ${response.status}`);
-            const result = await response.json();
-            const text = result.candidates[0].content.parts[0].text;
-            const cleanedText = text.replace(/```json/g, '').replace(/```/g, '').trim();
-            const questions = JSON.parse(cleanedText);
-            if (!Array.isArray(questions) || questions.length === 0) throw new Error("AI did not return valid questions.");
+        // Room events
+        socket.on('room-created', ({ roomCode, roomData, userId }) => {
+            setRoomCode(roomCode);
+            setRoomData(roomData);
+            setUserId(userId);
+        });
 
-            const roomRef = doc(db, 'quizRooms', roomCode);
-            await updateDoc(roomRef, { topic, difficulty, questions, currentQuestion: 0, gameState: 'in-game' });
-        } catch (err) {
-            console.error("Error generating questions:", err);
-            setError("Failed to generate quiz questions. The topic might be too obscure or there was a network issue. Please try a different topic.");
-        } finally {
+        socket.on('room-joined', ({ roomCode, roomData, userId }) => {
+            setRoomCode(roomCode);
+            setRoomData(roomData);
+            setUserId(userId);
+        });
+
+        socket.on('room-updated', ({ roomData }) => {
+            setRoomData(roomData);
+        });
+
+        socket.on('generating-questions', () => {
+            setIsGenerating(true);
+        });
+
+        socket.on('game-started', ({ roomData }) => {
+            setRoomData(roomData);
             setIsGenerating(false);
-        }
-    };
-
-    const handleAnswer = async (answerIndex, timeTaken) => {
-        if (!roomData || !userId) return;
-        const roomRef = doc(db, 'quizRooms', roomCode);
-        await updateDoc(roomRef, { [`players.${userId}.answers.${roomData.currentQuestion}`]: { answerIndex, timeTaken } });
-    };
-
-    const advanceGame = async (roomRef, currentRoomData) => {
-        const currentQuestionIndex = currentRoomData.currentQuestion;
-        const questionData = currentRoomData.questions[currentQuestionIndex];
-        const updatedPlayers = { ...currentRoomData.players };
-
-        Object.keys(updatedPlayers).forEach(pid => {
-            const player = updatedPlayers[pid];
-            const answerData = player.answers?.[currentQuestionIndex];
-            if (answerData && answerData.answerIndex === questionData.correctAnswerIndex) {
-                const timeTaken = answerData.timeTaken;
-                const timeRemaining = Math.max(0, 10 - timeTaken);
-                let score = 0;
-                let multiplier = 1;
-                
-                // New scoring system based on time ranges
-                if (timeTaken >= 0 && timeTaken <= 2) {
-                    // Answered in 8-10 seconds (0-2 seconds taken)
-                    multiplier = 2;
-                    score = Math.round(timeRemaining * multiplier);
-                } else if (timeTaken > 2 && timeTaken <= 5) {
-                    // Answered in 5-8 seconds (2-5 seconds taken)
-                    multiplier = 1.5;
-                    score = Math.round(timeRemaining * multiplier);
-                } else if (timeTaken > 5 && timeTaken <= 9) {
-                    // Answered in 1-5 seconds (5-9 seconds taken)
-                    multiplier = 1;
-                    score = Math.round(timeRemaining * multiplier);
-                } else {
-                    // Answered in last second or timeout
-                    multiplier = 0.5;
-                    score = Math.round(timeRemaining * multiplier);
-                }
-                
-                player.score += Math.max(score, 1); // Minimum 1 point for correct answer
-            }
         });
 
-        if (currentQuestionIndex < currentRoomData.questions.length - 1) {
-            await updateDoc(roomRef, { players: updatedPlayers, currentQuestion: currentQuestionIndex + 1 });
-        } else {
-            await updateDoc(roomRef, { players: updatedPlayers, gameState: 'finished' });
-        }
+        socket.on('answers-revealed', ({ roomData }) => {
+            setRoomData(roomData);
+        });
+
+        socket.on('next-question', ({ roomData }) => {
+            setRoomData(roomData);
+        });
+
+        socket.on('game-finished', ({ roomData }) => {
+            setRoomData(roomData);
+        });
+
+        socket.on('error', ({ message }) => {
+            setError(message);
+            setIsGenerating(false);
+        });
+
+        return () => {
+            socketService.removeAllListeners();
+            socketService.disconnect();
+        };
+    }, []);
+
+    const handleCreateRoom = () => {
+        if (!playerName.trim()) return setError('Please enter your name.');
+        setError('');
+        socketService.createRoom(playerName);
+    };
+
+    const handleJoinRoom = (codeToJoin) => {
+        if (!playerName.trim() || !codeToJoin.trim()) return setError('Please enter your name and a room code.');
+        setError('');
+        socketService.joinRoom(codeToJoin.toUpperCase(), playerName);
     };
     
-    const handlePlayAgain = async () => {
-        if (!roomData) return;
-        const roomRef = doc(db, 'quizRooms', roomCode);
-        const resetPlayers = { ...roomData.players };
-        Object.keys(resetPlayers).forEach(pid => {
-            resetPlayers[pid].score = 0;
-            resetPlayers[pid].answers = {};
-        });
-        await updateDoc(roomRef, { gameState: 'lobby', questions: [], currentQuestion: 0, topic: '', difficulty: '', players: resetPlayers });
+    const handleStartGame = (topic, difficulty) => {
+        if (!topic) return;
+        setError('');
+        socketService.startGame(topic, difficulty);
+    };
+
+    const handleAnswer = (answerIndex, timeTaken) => {
+        socketService.submitAnswer(answerIndex, timeTaken);
+    };
+    
+    const handlePlayAgain = () => {
+        socketService.playAgain();
+    };
+
+    const handleExitToHome = () => {
+        socketService.leaveRoom();
+        setRoomData(null);
     };
 
     const renderContent = () => {
-        if (!isAuthReady) return <div className="flex flex-col items-center justify-center gap-4"><Loader className="w-12 h-12 animate-spin text-indigo-500" /><p className="text-lg font-medium text-gray-500 dark:text-gray-300">Connecting...</p></div>;
-        if (error) return <div className="text-center p-4 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg">{error}</div>;
+        if (!isConnected) {
+            return (
+                <div className="min-h-screen w-full bg-[#0a0a0f] flex items-center justify-center">
+                    <div className="absolute inset-0">
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-violet-500/10 rounded-full blur-[150px]"></div>
+                    </div>
+                    <div className="relative z-10 flex flex-col items-center gap-4">
+                        <Loader className="w-12 h-12 animate-spin text-violet-500" />
+                        <p className="text-lg font-medium text-gray-400">Connecting to server...</p>
+                    </div>
+                </div>
+            );
+        }
+        if (error && !roomData) {
+            return (
+                <div className="min-h-screen w-full bg-[#0a0a0f] flex items-center justify-center p-6">
+                    <div className="absolute inset-0">
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-red-500/10 rounded-full blur-[150px]"></div>
+                    </div>
+                    <div className="relative z-10 max-w-md w-full bg-red-500/10 border border-red-500/20 rounded-2xl p-6 text-center">
+                        <p className="text-red-400 mb-4">{error}</p>
+                        <button 
+                            onClick={() => setError('')} 
+                            className="px-6 py-2 bg-white/5 border border-white/10 rounded-lg text-gray-300 hover:bg-white/10 transition-all"
+                        >
+                            Dismiss
+                        </button>
+                    </div>
+                </div>
+            );
+        }
         if (roomData) {
             switch (roomData.gameState) {
-                case 'lobby': return <LobbyScreen roomData={roomData} userId={userId} handleStartGame={handleStartGame} isGenerating={isGenerating} />;
+                case 'lobby': return <LobbyScreen roomData={roomData} userId={userId} handleStartGame={handleStartGame} isGenerating={isGenerating} error={error} />;
                 case 'in-game': return <GameScreen roomData={roomData} userId={userId} handleAnswer={handleAnswer} />;
-                case 'finished': return <ScoreboardScreen roomData={roomData} userId={userId} handlePlayAgain={handlePlayAgain} />;
-                default: return <p>Unknown game state.</p>;
+                case 'finished': return <ScoreboardScreen roomData={roomData} userId={userId} handlePlayAgain={handlePlayAgain} handleExitToHome={handleExitToHome} />;
+                default: return <p className="text-white">Unknown game state.</p>;
             }
         }
-        return <HomeScreen setPlayerName={setPlayerName} playerName={playerName} handleJoinRoom={handleJoinRoom} handleCreateRoom={handleCreateRoom} />;
+        return <HomeScreen setPlayerName={setPlayerName} playerName={playerName} handleJoinRoom={handleJoinRoom} handleCreateRoom={handleCreateRoom} pendingJoinCode={pendingJoinCode} setPendingJoinCode={setPendingJoinCode} />;
     };
 
     return (
-        <div className="bg-gray-50 dark:bg-gray-900 min-h-screen w-full flex items-center justify-center p-4 font-sans bg-gradient-to-br from-indigo-50 via-white to-cyan-50 dark:from-gray-900 dark:via-gray-800 dark:to-blue-900/50">
-            <div className="w-full">
-                {renderContent()}
-                {userId && <div className="text-center mt-6 text-xs text-gray-400 dark:text-gray-600">User ID: {userId}</div>}
-            </div>
+        <div className="min-h-screen w-full font-sans">
+            {renderContent()}
         </div>
     );
 }
