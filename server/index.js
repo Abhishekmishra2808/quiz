@@ -14,7 +14,7 @@ const httpServer = createServer(app);
 
 // Allow all origins in production, restrict in development
 const allowedOrigins = process.env.NODE_ENV === 'production' 
-    ? [process.env.FRONTEND_URL, "https://quizora.vercel.app", "https://quizora.netlify.app"]
+    ? [process.env.FRONTEND_URL, "https://quiz-iota-nine-98.vercel.app"]
     : ["http://localhost:5173", "http://127.0.0.1:5173"];
 
 const io = new Server(httpServer, {
